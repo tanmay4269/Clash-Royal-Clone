@@ -3,10 +3,10 @@ from pygame import Vector2
 import numpy as np
 
 from entity import Entity
-from player_side import PlayerSide
+# from player_side import PlayerSide
 
 class Knight(Entity):
-    def __init__(self, owner: PlayerSide, row, col):
+    def __init__(self, owner, row, col):
         super().__init__(owner, row, col)
         self.target = None
         self.radius = 8
