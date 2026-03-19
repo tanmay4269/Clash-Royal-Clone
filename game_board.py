@@ -13,6 +13,7 @@ from entities.crown_tower import CrownTower
 class GameBoard:
     def __init__(self):
         self.tile_size = 16  # Sub-tile cells
+            # * Each cell is just one pixel as off now, temporary simplificaton
 
         self.width = 18  # In tiles
         self.height = 32
@@ -33,6 +34,9 @@ class GameBoard:
         self.objects.extend(self.player_side_1.get_objects())
         self.objects.extend(self.player_side_2.get_objects())
 
+        # Binary occupancy map for pathfinding algorithm to work off of
+        #    Any blocking obstacle should be used to update this
+        #    This GameBoard object is reponsible of maintaining this up to date
         self.cell_occupancy = np.zeros(
             (self.width * self.tile_size, 
             self.height * self.tile_size), 
@@ -106,6 +110,7 @@ class GameBoard:
         # * DEBUG * 
         knight = Knight(self.player_side_2, tile_row + 1, tile_col + 1)
         knight.set_target(knight.owner.opponent.king_tower.position)
+        knight.find_path(self.cell_occupancy)
         self.objects.append(knight)
 
 
