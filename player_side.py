@@ -2,6 +2,8 @@ from entities.crown_tower import CrownTower
 
 class PlayerSide:
     def __init__(self):
+        self.opponent = None
+
         self.king_tower = None
         self.princess_tower_1 = None  # The one closer to (0, 0) 
         self.princess_tower_2 = None
@@ -14,6 +16,11 @@ class PlayerSide:
     
     def get_objects(self):
         return [self.king_tower, self.princess_tower_1, self.princess_tower_2]
+
+
+    def set_opponent(self, opponent):
+        assert opponent is not self
+        self.opponent = opponent
 
 # The one closer to (0, 0)
 class PlayerSide1(PlayerSide):

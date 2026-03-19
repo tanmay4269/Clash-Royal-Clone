@@ -20,6 +20,9 @@ class GameBoard:
         self.player_side_1 = PlayerSide1()  # The one closer to (0, 0)
         self.player_side_2 = PlayerSide2()
 
+        self.player_side_1.set_opponent(self.player_side_2)
+        self.player_side_2.set_opponent(self.player_side_1)
+
         self.objects: List[Entity] = []  # Contains all in game objects like buildings, troupes, etc.
 
         self.objects.extend([
@@ -56,6 +59,7 @@ class GameBoard:
 
         # Occupancy map
         if True:
+            # TODO: do something about recomputing this every single time
             rgb_occupancy_map = np.empty((self.cell_occupancy.shape[0], self.cell_occupancy.shape[1], 3), dtype=np.uint8)
             rgb_occupancy_map[:, :, 0] = 255 * (1 - self.cell_occupancy)
             rgb_occupancy_map[:, :, 1] = 255 * (1 - self.cell_occupancy)
@@ -96,12 +100,13 @@ class GameBoard:
 
     def on_click(self) -> None:
         (mouse_x, mouse_y) = pygame.mouse.get_pos()
-        tile_x = mouse_x // self.tile_size
-        tile_y = mouse_y // self.tile_size
+        tile_row = mouse_y // self.tile_size
+        tile_col = mouse_x // self.tile_size
 
-        self.objects.append(
-            Knight(self.player_side_2, tile_x + 1, tile_y + 1)
-        )
+        # * DEBUG * 
+        knight = Knight(self.player_side_2, tile_row + 1, tile_col + 1)
+        knight.set_target(knight.owner.opponent.king_tower.position)
+        self.objects.append(knight)
 
 
     def occupy_cells(self, mask: np.ndarray, mask_pos: Tuple[int, int]) -> bool:

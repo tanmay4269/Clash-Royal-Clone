@@ -10,6 +10,8 @@ class Entity:
         self.row = row
         self.col = col
 
+        self.position = Vector2(col * 16, row * 16)  # TODO: remove the hardcoding
+
         self.is_alive = True
 
 

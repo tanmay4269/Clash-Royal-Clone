@@ -10,17 +10,18 @@ class CrownTower(Entity):
         self.width = width
         self.height = height
 
+        self.position.x = self.col * 16 
+        self.position.y = self.row * 16 
+
 
     def render(self, screen) -> None:
         pygame.draw.rect(
             screen, "gray", 
             (
-                self.col * 16 - self.width/2 * 16, 
-                self.row * 16 - self.height/2 * 16, 
+                self.position.x - self.width/2 * 16,
+                self.position.y - self.height/2 * 16,
                 self.width * 16, 
                 self.height * 16, 
-                # self.col * 16 + self.width/2 * 16, self.row * 16 + self.height/2 * 16, 
-                # self.col * 16 + self.width/2 * 16, self.row * 16 + self.height/2 * 16, 
             )
         )
 
