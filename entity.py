@@ -27,5 +27,6 @@ class Entity:
         raise NotImplementedError
 
 
-    def get_cell_occupancy(self) -> np.ndarray:
+    def get_cell_occupancy(self):
+        # occupancy grid and top left position
         raise NotImplementedError

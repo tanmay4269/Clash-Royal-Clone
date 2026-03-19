@@ -22,6 +22,12 @@ class Knight(Entity):
         self.waypoint_reached_dist = 1.0
         self.waypoints = deque()  # left to right is the traversal pattern. self.find_path populates this and update pops from this
 
+        self.cell_occupancy = np.zeros((self.radius * 2, self.radius * 2), dtype=bool)
+        for r in range(self.radius * 2):
+            for c in range(self.radius * 2):
+                if (r - self.radius) ** 2 + (c - self.radius) ** 2 < self.radius ** 2:
+                    self.cell_occupancy[r, c] = True
+
 
     def render(self, screen) -> None:
         # pygame.draw.circle(screen, "black", self.position - Vector2(self.radius, self.radius), self.radius, width=2)
@@ -63,6 +69,11 @@ class Knight(Entity):
         self.target = target
 
 
+    def get_cell_occupancy(self):
+        return np.ones([1, 1], dtype=bool), self.position - Vector2(self.radius, self.radius)
+        # return self.cell_occupancy, self.position - Vector2(self.radius, self.radius)
+
+
     def find_path(self, occupancy_grid: np.ndarray) -> bool:
         """
         Given curent position and target position, this computes the right sequence
@@ -71,24 +82,29 @@ class Knight(Entity):
         Returns False if path couldn't be found for some reason
         """
 
+        # TODO: Make the grid layer wise, instead of binary
+        #   this way we can go to the buildings and also avoid our own underlying cell occupancy mask
+
         if self.target is None:
             return False
+
+        SCALE = 16  # Reduction by this much on each axis
 
         # 1 => occupied
         tiled_occupancy_grid = (
             occupancy_grid
             .astype(int)
-            .reshape(occupancy_grid.shape[0] // 16, 16, occupancy_grid.shape[1] // 16, 16)
+            .reshape(occupancy_grid.shape[0] // SCALE, SCALE, occupancy_grid.shape[1] // SCALE, SCALE)
             .transpose(0, 2, 1, 3)
             .max(axis=(2, 3))
         )
 
-        start_row = int(self.position.x / 16)
-        start_col = int(self.position.y / 16)
+        start_row = int(self.position.x / SCALE)
+        start_col = int(self.position.y / SCALE)
         start = (start_row, start_col)
 
-        target_row = int(self.target.x / 16)
-        target_col = int(self.target.y / 16)
+        target_row = int(self.target.x / SCALE)
+        target_col = int(self.target.y / SCALE)
         target = (target_row, target_col)
 
         path = self.astar_8(tiled_occupancy_grid, start, target)
@@ -98,7 +114,7 @@ class Knight(Entity):
 
         self.waypoints = deque()
         for wp in path[1:]:
-            self.waypoints.append(Vector2(wp) * 16 - Vector2(8, ))
+            self.waypoints.append(Vector2(wp) * SCALE + Vector2(SCALE/2, SCALE/2))
 
 
     def astar_8(self, grid, start, goal):

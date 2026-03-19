@@ -18,21 +18,7 @@ class GameBoard:
         self.width = 18  # In tiles
         self.height = 32
 
-        self.player_side_1 = PlayerSide1()  # The one closer to (0, 0)
-        self.player_side_2 = PlayerSide2()
-
-        self.player_side_1.set_opponent(self.player_side_2)
-        self.player_side_2.set_opponent(self.player_side_1)
-
         self.objects: List[Entity] = []  # Contains all in game objects like buildings, troupes, etc.
-
-        self.objects.extend([
-            self.player_side_1.king_tower,
-            self.player_side_1.king_tower,
-        ])
-
-        self.objects.extend(self.player_side_1.get_objects())
-        self.objects.extend(self.player_side_2.get_objects())
 
         # Binary occupancy map for pathfinding algorithm to work off of
         #    Any blocking obstacle should be used to update this
@@ -53,6 +39,25 @@ class GameBoard:
         self.occupy_cells(np.ones((self.tile_size * 5//2, self.tile_size * 2), dtype=bool), (0, self.tile_size * 15))
         self.occupy_cells(np.ones((self.tile_size * 5//2, self.tile_size * 2), dtype=bool), (self.tile_size * 31//2, self.tile_size * 15))
         self.occupy_cells(np.ones((self.tile_size * 9, self.tile_size * 2), dtype=bool), (self.tile_size * 9//2, self.tile_size * 15))
+        
+
+
+        self.player_side_1 = PlayerSide1()  # The one closer to (0, 0)
+        self.player_side_2 = PlayerSide2()
+
+        self.player_side_1.set_opponent(self.player_side_2)
+        self.player_side_2.set_opponent(self.player_side_1)
+
+        self.objects.extend([
+            self.player_side_1.king_tower,
+            self.player_side_1.king_tower,
+        ])
+
+        towers = []
+        towers.extend(self.player_side_1.get_objects())
+        towers.extend(self.player_side_2.get_objects())
+        for obj in towers:
+            self.deploy_entity(obj)
 
     
     def render(self, screen) -> None:
@@ -112,14 +117,19 @@ class GameBoard:
         knight.set_target(knight.owner.opponent.king_tower.position)
         knight.find_path(self.cell_occupancy)
         self.objects.append(knight)
+        # self.deploy_entity(knight)
 
 
-    def occupy_cells(self, mask: np.ndarray, mask_pos: Tuple[int, int]) -> bool:
+    def occupy_cells(self, mask: np.ndarray, mask_pos) -> bool:
         # If mask overlaps with something, return false
         # mask_pos is expected to be x, y and mask is to be width, height shaped
+        # Can also be used to "unoccupy" cells
 
         assert len(mask.shape) == 2
         assert mask.dtype == bool
+
+        if isinstance(mask_pos, Vector2):
+            mask_pos = (int(mask_pos.x), int(mask_pos.y))
 
         # 1. Check with self.cell_occupancy, if any intersection, return false
         tmp_mask = self.cell_occupancy[
@@ -139,7 +149,7 @@ class GameBoard:
         return True
 
 
-    def deploy_at(self, deploy_me: Entity) -> bool:
+    def deploy_entity(self, deploy_me: Entity) -> bool:
         # Return false if the entity can't be deployed in its current form
 
         # 1. Check if player has enough elixir
@@ -148,11 +158,14 @@ class GameBoard:
         
         # 2. Check if the deploy location (already written into the object, 
         #   access via public method) is available to deploy, if not return False
-        # Accept all for now
+        mask, mask_pos = deploy_me.get_cell_occupancy()
+        if self.occupy_cells(mask, mask_pos) is False:
+            return False
 
         # 3. Add to self.objects
         self.objects.append(deploy_me)
 
         # 4. Subtract player's elixirs and return True
-        deploy_me.owner.elixirs -= deploy_me.get_deploy_cost()
+        # * DEBUG *
+        # deploy_me.owner.elixirs -= deploy_me.get_deploy_cost()
         return True

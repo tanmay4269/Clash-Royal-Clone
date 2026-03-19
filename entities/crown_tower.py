@@ -1,4 +1,7 @@
 import pygame
+from pygame import Vector2
+
+import numpy as np
 
 from entity import Entity
 # from player_side import PlayerSide
@@ -15,6 +18,7 @@ class CrownTower(Entity):
 
 
     def render(self, screen) -> None:
+        return 
         pygame.draw.rect(
             screen, "gray", 
             (
@@ -32,3 +36,8 @@ class CrownTower(Entity):
 
     def get_deploy_cost(self) -> int:
         return 0
+
+
+    def get_cell_occupancy(self):
+        mask = np.ones((int(self.height * 16), int(self.width * 16)), dtype=bool)
+        return mask, self.position - Vector2(self.width/2 * 16, self.height/2 * 16)
