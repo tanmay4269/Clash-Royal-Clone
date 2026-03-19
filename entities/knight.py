@@ -13,7 +13,7 @@ class Knight(Entity):
     def __init__(self, owner, row, col):
         super().__init__(owner, row, col)
         self.radius = 8
-        self.position -= Vector2(self.radius, self.radius)
+        self.position -= Vector2(self.radius, self.radius)  # Position adjusting to center to the cell
 
         self.speed = 10.0  # TODO: Parametrise this
         self.velocity = Vector2()
@@ -98,7 +98,7 @@ class Knight(Entity):
 
         self.waypoints = deque()
         for wp in path[1:]:
-            self.waypoints.append(Vector2(wp) * 16)
+            self.waypoints.append(Vector2(wp) * 16 - Vector2(8, ))
 
 
     def astar_8(self, grid, start, goal):
