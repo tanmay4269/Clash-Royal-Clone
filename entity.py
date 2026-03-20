@@ -3,6 +3,8 @@ from pygame import Vector2
 # from player_side import PlayerSide
 
 class Entity:
+    CELL_OCCUPANCY_LAYERS = 3  # Excluding the trivial 0th layer
+
     def __init__(self, owner, row, col):
         self.owner = owner
 
@@ -25,6 +27,16 @@ class Entity:
 
     def get_deploy_cost(self) -> int:
         raise NotImplementedError
+
+
+    def get_cell_occupancy_index(self) -> int:
+        """
+        0 => Unoccupied
+        1 => Permanent occupancy
+        2 => Building
+        3 => Troup
+        """
+        return 0
 
 
     def get_cell_occupancy(self):

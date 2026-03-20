@@ -20,56 +20,56 @@ class GameBoard:
 
         self.objects: List[Entity] = []  # Contains all in game objects like buildings, troupes, etc.
 
-        # Binary occupancy map for pathfinding algorithm to work off of
-        #    Any blocking obstacle should be used to update this
-        #    This GameBoard object is reponsible of maintaining this up to date
+        # Occupancy Grid
+        #   0 => Unoccupied
+        #   1 => Permanent occupancy
+        #   2 => Building
+        #   3 => Troup
+        # TODO: This should be its own class coz I later also wanna implement an `on_update`
+        #   that depends on this matrix being updated and only upon update down stream recomputation occurs
         self.cell_occupancy = np.zeros(
             (self.width * self.tile_size, 
             self.height * self.tile_size), 
-            dtype=bool
         )
 
         # Top and bottom rows
-        self.occupy_cells(np.ones((self.tile_size * 6, self.tile_size), dtype=bool), (0, 0))
-        self.occupy_cells(np.ones((self.tile_size * 6, self.tile_size), dtype=bool), (self.tile_size * 12, 0))
-        self.occupy_cells(np.ones((self.tile_size * 6, self.tile_size), dtype=bool), (0, (self.height-1) * self.tile_size))
-        self.occupy_cells(np.ones((self.tile_size * 6, self.tile_size), dtype=bool), (self.tile_size * 12, (self.height-1) * self.tile_size))
+        self.occupy_cells(np.ones((self.tile_size * 6, self.tile_size)), (0, 0))
+        self.occupy_cells(np.ones((self.tile_size * 6, self.tile_size)), (self.tile_size * 12, 0))
+        self.occupy_cells(np.ones((self.tile_size * 6, self.tile_size)), (0, (self.height-1) * self.tile_size))
+        self.occupy_cells(np.ones((self.tile_size * 6, self.tile_size)), (self.tile_size * 12, (self.height-1) * self.tile_size))
 
         # The divider
-        self.occupy_cells(np.ones((self.tile_size * 5//2, self.tile_size * 2), dtype=bool), (0, self.tile_size * 15))
-        self.occupy_cells(np.ones((self.tile_size * 5//2, self.tile_size * 2), dtype=bool), (self.tile_size * 31//2, self.tile_size * 15))
-        self.occupy_cells(np.ones((self.tile_size * 9, self.tile_size * 2), dtype=bool), (self.tile_size * 9//2, self.tile_size * 15))
+        self.occupy_cells(np.ones((self.tile_size * 5//2, self.tile_size * 2)), (0, self.tile_size * 15))
+        self.occupy_cells(np.ones((self.tile_size * 5//2, self.tile_size * 2)), (self.tile_size * 31//2, self.tile_size * 15))
+        self.occupy_cells(np.ones((self.tile_size * 9, self.tile_size * 2)),    (self.tile_size * 9//2, self.tile_size * 15))
         
-
-
+        # Adding player sides
         self.player_side_1 = PlayerSide1()  # The one closer to (0, 0)
         self.player_side_2 = PlayerSide2()
 
         self.player_side_1.set_opponent(self.player_side_2)
         self.player_side_2.set_opponent(self.player_side_1)
 
-        self.objects.extend([
-            self.player_side_1.king_tower,
-            self.player_side_1.king_tower,
-        ])
-
-        towers = []
-        towers.extend(self.player_side_1.get_objects())
-        towers.extend(self.player_side_2.get_objects())
+        # Deploying crown towers
+        towers = self.player_side_1.get_objects() + self.player_side_2.get_objects()
         for obj in towers:
             self.deploy_entity(obj)
 
     
-    def render(self, screen) -> None:
-        # For simplicity, I'll keep each sub-tile cell as one pixel
+    def render(self, screen, render_cell_occupancy=True) -> None:
+        """        
+        * For simplicity, I'll keep each sub-tile cell as one pixel
+        """
 
         # Ground layer
         screen.fill("#D1CC95")
 
         # Occupancy map
-        if True:
-            # TODO: do something about recomputing this every single time
+        if render_cell_occupancy:
+            # TODO: Make it so that this isn't wastefuly recomputed each time
             rgb_occupancy_map = np.empty((self.cell_occupancy.shape[0], self.cell_occupancy.shape[1], 3), dtype=np.uint8)
+
+            # TODO: Manage multiple layers
             rgb_occupancy_map[:, :, 0] = 255 * (1 - self.cell_occupancy)
             rgb_occupancy_map[:, :, 1] = 255 * (1 - self.cell_occupancy)
             rgb_occupancy_map[:, :, 2] = 255 * (1 - self.cell_occupancy)
@@ -80,6 +80,7 @@ class GameBoard:
 
 
         # Faint gridlines 
+        #   TODO: This can probably be optimised by precomputing a sprite 
         for r in range(self.height):
             for c in range(self.width):
                 pygame.draw.line(screen, (128, 128, 128), (0, self.tile_size * r), (self.tile_size * self.width, self.tile_size * r), 1)
@@ -91,7 +92,7 @@ class GameBoard:
             obj.render(screen)
 
         
-        # Highlighted cell
+        # Highlighted cell under the cursor
         (mouse_x, mouse_y) = pygame.mouse.get_pos()
         tile_x = mouse_x // self.tile_size
         tile_y = mouse_y // self.tile_size
@@ -116,41 +117,15 @@ class GameBoard:
         knight = Knight(self.player_side_2, tile_row + 1, tile_col + 1)
         knight.set_target(knight.owner.opponent.king_tower.position)
         knight.find_path(self.cell_occupancy)
-        self.objects.append(knight)
-        # self.deploy_entity(knight)
 
-
-    def occupy_cells(self, mask: np.ndarray, mask_pos) -> bool:
-        # If mask overlaps with something, return false
-        # mask_pos is expected to be x, y and mask is to be width, height shaped
-        # Can also be used to "unoccupy" cells
-
-        assert len(mask.shape) == 2
-        assert mask.dtype == bool
-
-        if isinstance(mask_pos, Vector2):
-            mask_pos = (int(mask_pos.x), int(mask_pos.y))
-
-        # 1. Check with self.cell_occupancy, if any intersection, return false
-        tmp_mask = self.cell_occupancy[
-            mask_pos[0] : mask_pos[0] + mask.shape[0], 
-            mask_pos[1] : mask_pos[1] + mask.shape[1], 
-        ]
-
-        if np.any(tmp_mask & mask):
-            return False
-
-        # 2. Else just OR it to the cell occupancy
-        self.cell_occupancy[
-            mask_pos[0] : mask_pos[0] + mask.shape[0], 
-            mask_pos[1] : mask_pos[1] + mask.shape[1], 
-        ] = mask
-
-        return True
+        if self.deploy_entity(knight) is False:
+            print("Failed deploying knight")
 
 
     def deploy_entity(self, deploy_me: Entity) -> bool:
-        # Return false if the entity can't be deployed in its current form
+        """
+        Return false if the entity can't be deployed in its current form
+        """
 
         # 1. Check if player has enough elixir
         if deploy_me.owner.elixirs < deploy_me.get_deploy_cost():
@@ -169,3 +144,44 @@ class GameBoard:
         # * DEBUG *
         # deploy_me.owner.elixirs -= deploy_me.get_deploy_cost()
         return True
+
+
+    def occupy_cells(self, mask: np.ndarray, mask_pos) -> bool:
+        """
+        If mask overlaps with something, return false
+        mask_pos is expected to be x, y and mask is to be width, height shaped
+        
+        Can also be used to "unoccupy" cells
+        """
+
+        assert len(mask.shape) == 2
+
+        if isinstance(mask_pos, Vector2):
+            mask_pos = (int(mask_pos.x), int(mask_pos.y))
+
+        # 1. Check with self.cell_occupancy, if any intersection, return false
+        row_min, row_max = mask_pos[0], mask_pos[0] + mask.shape[0]
+        col_min, col_max = mask_pos[1], mask_pos[1] + mask.shape[1]
+
+        tmp_mask = self.cell_occupancy[
+            row_min : row_max, 
+            col_min : col_max, 
+        ]
+
+        # Check on each layer
+        for bg_layer in range(1, Entity.CELL_OCCUPANCY_LAYERS+1):
+            for fg_layer in range(bg_layer, Entity.CELL_OCCUPANCY_LAYERS+1):
+                tmp_mask_layer  = np.where(tmp_mask == bg_layer, True, False)
+                mask_layer      = np.where(mask == fg_layer, True, False)
+
+                if np.any(tmp_mask_layer & mask_layer):
+                    return False
+
+        # 2. Else just OR it to the cell occupancy
+        self.cell_occupancy[
+            row_min : row_max, 
+            col_min : col_max, 
+        ] = mask
+
+        return True
+

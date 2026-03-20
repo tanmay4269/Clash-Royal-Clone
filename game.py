@@ -5,7 +5,7 @@ class Game:
     def __init__(self):
         self.game_board = GameBoard()
         
-        # For simplicity, each sub-tile cell is a pixel
+        # * For simplicity, each sub-tile cell is a pixel
         self.width = self.game_board.width * self.game_board.tile_size
         self.height = self.game_board.height * self.game_board.tile_size
 
@@ -29,8 +29,6 @@ class Game:
 
         self.game_board.render(self.screen)
         self.game_board.update(self.dt)
-
-        # print(pygame.mouse.get_pos())
 
         # flip() the display to put your work on screen
         pygame.display.flip()
