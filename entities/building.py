@@ -5,6 +5,7 @@ import numpy as np
 
 from entity import Entity
 
+
 class Building(Entity):
     def __init__(self, owner, row: int, col: int, width: int, height: int):
         super().__init__(owner, row, col)

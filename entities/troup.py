@@ -7,6 +7,7 @@ from collections import deque
 
 from entity import Entity
 
+
 class Troup(Entity):
     def __init__(self, owner, row, col, radius, speed):
         super().__init__(owner, row, col)
@@ -47,9 +48,7 @@ class Troup(Entity):
             self.target = None
             return
         
-        waypoint = self.waypoints[0]
-        # waypoint = self.waypoints[0] + Vector2(16, 16)
-        displacement = waypoint - self.position
+        displacement = self.waypoints[0] - self.position
 
         if displacement.length() < self.waypoint_reached_dist:
             self.waypoints.popleft()
@@ -72,8 +71,8 @@ class Troup(Entity):
 
 
     def get_cell_occupancy(self):
-        # return np.ones([1, 1]) * self.get_cell_occupancy_index(), self.position - Vector2(self.radius, self.radius)
-        return self.cell_occupancy * self.get_cell_occupancy_index(), self.position - Vector2(self.radius, self.radius)
+        return np.ones([1, 1]) * self.get_cell_occupancy_index(), self.position - Vector2(self.radius, self.radius)
+        # return self.cell_occupancy * self.get_cell_occupancy_index(), self.position - Vector2(self.radius, self.radius)
 
 
     def find_path(self, occupancy_grid: np.ndarray) -> bool:

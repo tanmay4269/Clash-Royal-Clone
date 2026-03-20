@@ -1,6 +1,6 @@
 import numpy as np
 from pygame import Vector2
-# from player_side import PlayerSide
+
 
 class Entity:
     CELL_OCCUPANCY_LAYERS = 3  # Excluding the trivial 0th layer

@@ -1,6 +1,7 @@
 import pygame
 from game_board import GameBoard
 
+
 class Game:
     def __init__(self):
         self.game_board = GameBoard()

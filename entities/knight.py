@@ -7,6 +7,7 @@ from collections import deque
 
 from entities.troup import Troup
 
+
 class Knight(Troup):
     def __init__(self, owner, row, col):
         super().__init__(owner, row, col, radius=8, speed=10.0)

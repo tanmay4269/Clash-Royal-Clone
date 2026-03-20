@@ -10,6 +10,7 @@ from entity import Entity
 from entities.knight import Knight
 from entities.crown_tower import CrownTower
 
+
 class GameBoard:
     def __init__(self):
         self.tile_size = 16  # Sub-tile cells
