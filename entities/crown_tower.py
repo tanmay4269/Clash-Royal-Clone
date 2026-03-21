@@ -13,3 +13,12 @@ class CrownTower(Building):
     def render(self, screen) -> None:
         # super().render(screen, "gray")
         return 
+
+
+    def update(self, dt) -> None:
+        # TODO: shooting mechanics yet to be implemented
+        return
+
+
+    def get_deploy_cost(self) -> int:
+        return 0

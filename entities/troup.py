@@ -7,30 +7,39 @@ from collections import deque
 
 from entity import Entity
 
+from utils import *
+
 
 class Troup(Entity):
-    def __init__(self, owner, row, col, radius, speed):
+    COLLISION_COEF  = 10.0  # This times the overlap while collision is applied to this object
+    FORCE_DECAY     = 0.8
+
+    def __init__(self, owner, row, col, radius, speed, mass):
         super().__init__(owner, row, col)
         self.radius = radius
-        self.position -= Vector2(self.radius, self.radius)  # Position adjusting to center to the cell
+        self.size = self.radius * 16
+        self.position -= Vector2(self.size, self.size)  # Position adjusting to center to the cell
+
+        self.mass = mass
 
         self.speed = speed 
         self.velocity = Vector2()
+        self.acceleration = Vector2()
 
         self.target = None
         self.waypoint_reached_dist = 1.0
         self.waypoints = deque()  # left to right is the traversal pattern. self.find_path populates this and update pops from this
 
-        self.cell_occupancy = np.zeros((self.radius * 2, self.radius * 2))
-        for r in range(self.radius * 2):
-            for c in range(self.radius * 2):
-                if (r - self.radius) ** 2 + (c - self.radius) ** 2 < self.radius ** 2:
+        self.cell_occupancy = np.zeros((int(self.size * 2), int(self.size * 2)))
+        for r in range(int(self.size * 2)):
+            for c in range(int(self.size * 2)):
+                if (r - self.size) ** 2 + (c - self.size) ** 2 < self.size ** 3:
                     self.cell_occupancy[r, c] = True
 
 
     def render(self, screen) -> None:
-        # pygame.draw.circle(screen, "black", self.position - Vector2(self.radius, self.radius), self.radius, width=2)
-        pygame.draw.circle(screen, "black", self.position, self.radius, width=2)
+        # pygame.draw.circle(screen, "black", self.position - Vector2(self.size, self.size), self.size, width=2)
+        pygame.draw.circle(screen, "black", self.position, self.size, width=2)
 
         for i in range(len(self.waypoints)-1):
             pygame.draw.line(screen, "green", self.waypoints[i], self.waypoints[i+1], width=5)
@@ -54,7 +63,13 @@ class Troup(Entity):
             self.waypoints.popleft()
 
         self.velocity = displacement.normalize() * self.speed
+
+
+        # TODO: I forgot the optimal ordering here
+        self.velocity += dt * self.acceleration
         self.position += dt * self.velocity
+
+        self.acceleration *= FORCE_DECAY  # ! Assuming all forces are impulsive in the game
 
 
     def get_deploy_cost(self) -> int:
@@ -71,8 +86,15 @@ class Troup(Entity):
 
 
     def get_cell_occupancy(self):
-        return np.ones([1, 1]) * self.get_cell_occupancy_index(), self.position - Vector2(self.radius, self.radius)
-        # return self.cell_occupancy * self.get_cell_occupancy_index(), self.position - Vector2(self.radius, self.radius)
+        return np.ones([1, 1]) * self.get_cell_occupancy_index(), self.position - Vector2(self.size, self.size)
+        # return self.cell_occupancy * self.get_cell_occupancy_index(), self.position - Vector2(self.size, self.size)
+
+
+    def apply_force(self, force: Vector2) -> None:
+        self.acceleration += force / self.mass
+
+        # Hacky -- Doesn't look great
+        # self.position += force.normalize() * 0.5
 
 
     def find_path(self, occupancy_grid: np.ndarray) -> bool:
@@ -82,9 +104,6 @@ class Troup(Entity):
 
         Returns False if path couldn't be found for some reason
         """
-
-        # TODO: Make the grid layer wise, instead of binary
-        #   this way we can go to the buildings and also avoid our own underlying cell occupancy mask
 
         if self.target is None:
             return False
@@ -99,15 +118,10 @@ class Troup(Entity):
             .max(axis=(2, 3))
         )
 
-        start_row = int(self.position.x / SCALE)
-        start_col = int(self.position.y / SCALE)
-        start = (start_row, start_col)
+        start = (int(self.position.x / SCALE), int(self.position.y / SCALE))
+        target = (int(self.target.x / SCALE), int(self.target.y / SCALE))
 
-        target_row = int(self.target.x / SCALE)
-        target_col = int(self.target.y / SCALE)
-        target = (target_row, target_col)
-
-        path = self.astar_8(tiled_occupancy_grid, start, target)
+        path = self.a_star(tiled_occupancy_grid, start, target)
 
         if path is None:
             return False
@@ -118,7 +132,7 @@ class Troup(Entity):
         self.waypoints.append(Vector2(path[-1]) * SCALE)  # Offset on the last waypoint looks awkward
 
 
-    def astar_8(self, grid, start, goal):
+    def a_star(self, grid, start, goal):
         """
         8-way connected on the grid
         Uses Octile Distance huristic
@@ -130,7 +144,6 @@ class Troup(Entity):
             dx, dy = abs(a[0] - b[0]), abs(a[1] - b[1])
             return (dx + dy) + (np.sqrt(2) - 2) * min(dx, dy)  # Octile
 
-        # 8 neighbors: cardinals + diagonals
         neighbors = [(-1,0),(1,0),(0,-1),(0,1),
                     (-1,-1),(-1,1),(1,-1),(1,1)]
 

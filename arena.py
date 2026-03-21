@@ -7,11 +7,16 @@ from pygame import Vector2
 from player_side import PlayerSide, PlayerSide1, PlayerSide2
 from entity import Entity
 
-from entities.knight import Knight
+from entities.building import Building
+from entities.troup import Troup
+
 from entities.crown_tower import CrownTower
+from entities.knight import Knight
+
+from utils import *
 
 
-class GameBoard:
+class Arena:
     def __init__(self):
         self.tile_size = 16  # Sub-tile cells
             # * Each cell is just one pixel as off now, temporary simplificaton
@@ -53,7 +58,7 @@ class GameBoard:
 
         # Deploying crown towers
         towers = self.player_side_1.get_objects() + self.player_side_2.get_objects()
-        for obj in towers:
+        for obj in towers[:1]:
             self.deploy_entity(obj)
 
     
@@ -105,6 +110,41 @@ class GameBoard:
  
 
     def update(self, dt) -> None:
+        # Checking for collisions and pushing them away
+        #   Makes a reasonable simplifying assumption that buildings are rects and troups are circles
+        # TODO: Maybe much later I implement spacial proximity based approach. If things lag, this could be an optimisation
+        # TODO: Put this in another method
+        for obj_i in self.objects:
+            for obj_j in self.objects:
+                if obj_i == obj_j:
+                    continue
+
+                if not isinstance(obj_j, Troup):
+                    continue
+
+                if isinstance(obj_i, Building):
+                    # Building-troup collision
+                    delta = obj_i.position - obj_j.position
+                    overlap = (obj_i.size / 2 + Vector2(obj_j.size, obj_j.size)) - Vector2(abs(delta.x), abs(delta.y))
+
+                    if overlap.x < 0 or overlap.y < 0:
+                        continue
+
+                    force = -delta.normalize() * overlap.length() * Troup.COLLISION_COEF
+                    obj_j.apply_force(force)
+                else: 
+                    # Troup-troup collision
+                    delta = obj_i.position - obj_j.position
+                    overlap = (obj_i.size + obj_j.size) - delta.length()
+
+                    if overlap < 0:
+                        continue
+
+                    force = delta.normalize() * overlap * Troup.COLLISION_COEF
+                    obj_i.apply_force(force)
+                    obj_j.apply_force(-force)
+
+
         for obj in self.objects:
             obj.update(dt)
 
@@ -172,6 +212,8 @@ class GameBoard:
         # Check on each layer
         for bg_layer in range(1, Entity.CELL_OCCUPANCY_LAYERS+1):
             for fg_layer in range(bg_layer, Entity.CELL_OCCUPANCY_LAYERS+1):
+                if bg_layer == 3 and bg_layer == fg_layer:
+                    continue   # Don't check for troup-troup deployment constraint
                 tmp_mask_layer  = np.where(tmp_mask == bg_layer, True, False)
                 mask_layer      = np.where(mask == fg_layer, True, False)
 

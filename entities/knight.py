@@ -10,7 +10,7 @@ from entities.troup import Troup
 
 class Knight(Troup):
     def __init__(self, owner, row, col):
-        super().__init__(owner, row, col, radius=8, speed=10.0)
+        super().__init__(owner, row, col, radius=0.5, speed=10.0, mass=1.0)
 
     def get_deploy_cost(self) -> int:
         return 3

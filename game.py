@@ -1,14 +1,14 @@
 import pygame
-from game_board import GameBoard
+from arena import Arena
 
 
 class Game:
     def __init__(self):
-        self.game_board = GameBoard()
+        self.arena = Arena()
         
         # * For simplicity, each sub-tile cell is a pixel
-        self.width = self.game_board.width * self.game_board.tile_size
-        self.height = self.game_board.height * self.game_board.tile_size
+        self.width = self.arena.width * self.arena.tile_size
+        self.height = self.arena.height * self.arena.tile_size
 
         # pygame setup
         pygame.init()
@@ -26,10 +26,10 @@ class Game:
                 self.running = False
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1: # Left mouse button
-                    self.game_board.on_click()
+                    self.arena.on_click()
 
-        self.game_board.render(self.screen)
-        self.game_board.update(self.dt)
+        self.arena.render(self.screen)
+        self.arena.update(self.dt)
 
         # flip() the display to put your work on screen
         pygame.display.flip()
