@@ -14,7 +14,7 @@ class Troup(Entity):
     COLLISION_COEF  = 10.0  # This times the overlap while collision is applied to this object
     FORCE_DECAY     = 0.8
 
-    def __init__(self, owner, row, col, radius, speed, mass):
+    def __init__(self, owner, row, col, radius, speed, mass, attack_radius):
         super().__init__(owner, row, col)
         self.radius = radius
         self.size = self.radius * 16
@@ -25,6 +25,8 @@ class Troup(Entity):
         self.speed = speed 
         self.velocity = Vector2()
         self.acceleration = Vector2()
+        
+        self.attack_radius_cells = attack_radius * 16
 
         self.target = None
         self.waypoint_reached_dist = 1.0

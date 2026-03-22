@@ -58,7 +58,7 @@ class Arena:
 
         # Deploying crown towers
         towers = self.player_side_1.get_objects() + self.player_side_2.get_objects()
-        for obj in towers[:1]:
+        for obj in towers:
             self.deploy_entity(obj)
 
     
