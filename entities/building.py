@@ -31,7 +31,7 @@ class Building(Entity):
         )
 
 
-    def update(self, dt) -> None:
+    def update(self, dt, arena_cell_occupancy) -> None:
         raise NotImplementedError
 
 

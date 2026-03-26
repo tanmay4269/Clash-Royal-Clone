@@ -28,7 +28,7 @@ class Troup(Entity):
         
         self.attack_radius_cells = attack_radius * 16
 
-        self.target = None
+        self.target = None  # Vector2 or None
         self.waypoint_reached_dist = 1.0
         self.waypoints = deque()  # left to right is the traversal pattern. self.find_path populates this and update pops from this
 
@@ -47,12 +47,13 @@ class Troup(Entity):
             pygame.draw.line(screen, "green", self.waypoints[i], self.waypoints[i+1], width=5)
 
 
-    def update(self, dt) -> None:
+    def update(self, dt, arena_cell_occupancy) -> None:
         # If target is not None, pathfind to that and take incremental steps towards it
         # Else set target to the closest compatable victim 
 
         if self.target is None:
-            ...  # TODO: Set a target
+            self.set_target()
+            self.find_path(arena_cell_occupancy)
             return 
 
         if len(self.waypoints) == 0:
@@ -71,16 +72,36 @@ class Troup(Entity):
         self.velocity += dt * self.acceleration
         self.position += dt * self.velocity
 
-        self.acceleration *= FORCE_DECAY  # ! Assuming all forces are impulsive in the game
+        self.acceleration *= Troup.FORCE_DECAY  # ! Assuming all forces are impulsive in the game
 
 
     def get_deploy_cost(self) -> int:
         raise NotImplementedError
 
 
-    def set_target(self, target: Vector2):
+    def set_target(self, target=None):
+        """
+        If no target is given, find a target using self.owner.opponent.objects
+        """
+
         # Doesn't need to know who the target is, just knowing the location is fine
-        self.target = target
+        if target:
+            self.target = target
+            return
+
+        # Target closest tower by default
+        closest_obj, closest_dist = None, float('inf')
+        for obj in self.owner.opponent.objects:
+            dist = (self.position - obj.position).length()
+
+            if dist < closest_dist:
+                closest_obj = obj
+                closest_dist = dist
+
+        assert(closest_obj is not None)
+
+        self.target = closest_obj.position
+
 
 
     def get_cell_occupancy_index(self):

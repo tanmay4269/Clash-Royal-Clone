@@ -146,7 +146,7 @@ class Arena:
 
 
         for obj in self.objects:
-            obj.update(dt)
+            obj.update(dt, self.cell_occupancy)
 
 
     def on_click(self) -> None:
@@ -156,8 +156,9 @@ class Arena:
 
         # * DEBUG * 
         knight = Knight(self.player_side_2, tile_row + 1, tile_col + 1)
-        knight.set_target(knight.owner.opponent.king_tower.position)
-        knight.find_path(self.cell_occupancy)
+        self.player_side_2.add_object(knight)
+        # knight.set_target(knight.owner.opponent.king_tower.position)
+        # knight.find_path(self.cell_occupancy)
 
         if self.deploy_entity(knight) is False:
             print("Failed deploying knight")
