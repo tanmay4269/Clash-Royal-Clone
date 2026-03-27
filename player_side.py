@@ -16,7 +16,7 @@ class PlayerSide:
         self.max_elixirs = 10
         self.elixirs_per_sec = 1
 
-        self.objects = None  # Add towers once initialised
+        self.objects = set()  # Add towers once initialised
 
     
     def get_objects(self):
@@ -24,7 +24,11 @@ class PlayerSide:
 
 
     def add_object(self, obj):
-        self.objects.append(obj)
+        self.objects.add(obj)
+
+
+    def remove_object(self, obj):
+        self.objects.remove(obj)
 
 
     def set_opponent(self, opponent):
@@ -41,9 +45,9 @@ class PlayerSide1(PlayerSide):
         self.princess_tower_1 = PrincessTower(self, 6.5, 3.5, 2, 2)
         self.princess_tower_2 = PrincessTower(self, 6.5, 18 - 3.5, 2, 2)
 
-        self.objects = [
+        self.objects = {
             self.king_tower, self.princess_tower_1, self.princess_tower_2
-        ]
+        }
 
 
 class PlayerSide2(PlayerSide):
@@ -55,6 +59,6 @@ class PlayerSide2(PlayerSide):
         self.princess_tower_1 = PrincessTower(self, 32 - 6.5, 3.5, 2, 2)
         self.princess_tower_2 = PrincessTower(self, 32 - 6.5, 18 - 3.5, 2, 2)
         
-        self.objects = [
+        self.objects = {
             self.king_tower, self.princess_tower_1, self.princess_tower_2
-        ]
+        }

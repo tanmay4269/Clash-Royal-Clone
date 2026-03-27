@@ -40,6 +40,18 @@ class Building(Entity):
         )
 
 
+        # Health Bar
+        health_bar_length = 30 * (self.health / self.hitpoints)
+
+        pygame.draw.line(
+            screen, 
+            color, 
+            self.position + Vector2(-15, -self.size.y/2 - 15),
+            self.position + Vector2(-15 + health_bar_length, -self.size.y/2 - 15),
+            width=2
+        )
+
+
     def get_cell_occupancy_index(self) -> int:
         return 2
 

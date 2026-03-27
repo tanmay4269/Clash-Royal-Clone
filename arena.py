@@ -17,7 +17,7 @@ class Arena:
         self.width = 18  # In tiles
         self.height = 32
 
-        self.objects: List[Entity] = []  # Contains all in game objects like buildings, troupes, etc.
+        self.objects: Set[Entity] = set()  # Contains all in game objects like buildings, troupes, etc.
 
         # Occupancy Grid
         #   0 => Unoccupied
@@ -50,7 +50,7 @@ class Arena:
         self.player_side_2.set_opponent(self.player_side_1)
 
         # Deploying crown towers
-        towers = self.player_side_1.get_objects() + self.player_side_2.get_objects()
+        towers = self.player_side_1.get_objects() | self.player_side_2.get_objects()
         for obj in towers:
             self.deploy_entity(obj)
 
@@ -142,8 +142,21 @@ class Arena:
                     obj_j.apply_force(-force)
 
 
+        dead_objs = set()
         for obj in self.objects:
-            obj.update(dt, self.cell_occupancy)
+            if not obj.update(dt, self.cell_occupancy):
+                dead_objs.add(obj)
+
+        while len(dead_objs):
+            obj = dead_objs.pop()
+
+            if obj.owner.side_index == 1:
+                self.player_side_1.remove_object(obj)
+            elif obj.owner.side_index == 2:
+                self.player_side_2.remove_object(obj)
+            
+            self.objects.remove(obj)
+            del obj
 
 
     def on_click(self) -> None:
@@ -160,7 +173,6 @@ class Arena:
             knight = Knight(self.player_side_2, tile_row + 1, tile_col + 1)
             self.player_side_2.add_object(knight)
         
-
         if self.deploy_entity(knight) is False:
             print("Failed deploying knight")
 
@@ -181,7 +193,7 @@ class Arena:
             return False
 
         # 3. Add to self.objects
-        self.objects.append(deploy_me)
+        self.objects.add(deploy_me)
 
         # 4. Subtract player's elixirs and return True
         # * DEBUG *

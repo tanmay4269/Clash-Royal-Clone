@@ -15,7 +15,11 @@ class Knight(Troop):
             hit_speed=1.2
         )
         
+
+    def get_deploy_cost(self) -> int:
+        return 3
     
+
     def render(self, screen) -> None:
         if self.owner.side_index == 1:
             color = "red"
@@ -24,6 +28,3 @@ class Knight(Troop):
 
         super().render(screen, color)
 
-
-    def get_deploy_cost(self) -> int:
-        return 3

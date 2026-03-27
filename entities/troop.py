@@ -1,9 +1,8 @@
 from utils import *
+from entity import Entity
 
 import heapq
 from collections import deque
-
-from entity import Entity
 
 
 class Troop(Entity):
@@ -57,20 +56,18 @@ class Troop(Entity):
                     self.cell_occupancy[r, c] = True
 
 
-    def get_deploy_cost(self) -> int:
-        raise NotImplementedError
-
-
     def render(self, screen, color) -> None:
         # Body
         pygame.draw.circle(screen, color, self.position, self.size)
 
         # Health Bar
+        health_bar_length = 30 * (self.health / self.hitpoints)
+
         pygame.draw.line(
             screen, 
             color, 
-            self.position + Vector2(-20, -self.size - 10),
-            self.position + Vector2( 20, -self.size - 10),
+            self.position + Vector2(-15, -self.size - 15),
+            self.position + Vector2(-15 + health_bar_length, -self.size - 15),
             width=2
         )
 
@@ -80,8 +77,8 @@ class Troop(Entity):
         pygame.draw.circle(screen, "black", self.position, self.attack_radius_cells, width=1)
 
         # Waypoints
-        # for i in range(len(self.waypoints)-1):
-        #     pygame.draw.line(screen, "green", self.waypoints[i], self.waypoints[i+1], width=1)
+        for i in range(len(self.waypoints)-1):
+            pygame.draw.line(screen, "green", self.waypoints[i], self.waypoints[i+1], width=1)
 
 
     def update(self, dt, arena_cell_occupancy) -> bool:
@@ -98,23 +95,28 @@ class Troop(Entity):
         self._attack_timer += dt
 
         ### Navigation ###
+        self.velocity = Vector2()  # Reset velocity each tick. 
+            # ! Think this through
 
         # Every tick, update target and path to it
         #   FIXME Wasteful approach, need to do something smarter
         self.set_target()
-        self.find_path(arena_cell_occupancy)
-
-        if len(self.waypoints) == 0:
-            self.target = None
-            return True
         
-        displacement = self.waypoints[0] - self.position
+        # If the target is out of reach, navigate to it
+        if (self.position - self.target.position).length() > self.attack_radius_cells:
+            self.find_path(arena_cell_occupancy)
 
-        if displacement.length() < self.waypoint_reached_dist:
-            self.waypoints.popleft()
+            if len(self.waypoints) == 0:
+                self.target = None
+                return True
+            
+            displacement = self.waypoints[0] - self.position
 
-        self.velocity = displacement.normalize() * self.speed
+            if displacement.length() < self.waypoint_reached_dist:
+                self.waypoints.popleft()
 
+            self.velocity = displacement.normalize() * self.speed
+        
         self.velocity += dt * self.acceleration
         self.position += dt * self.velocity
 

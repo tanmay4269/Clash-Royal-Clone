@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import Tuple, List, Set
 import numpy as np
 
 import pygame
