@@ -1,14 +1,23 @@
-import pygame
-from pygame import Vector2
-
-import numpy as np
-
+from utils import *
 from entity import Entity
 
 
 class Building(Entity):
-    def __init__(self, owner, row: int, col: int, width: int, height: int):
-        super().__init__(owner, row, col)
+    def __init__(
+        self, owner, row: int, col: int, 
+        width: int, height: int,
+        hitpoints,
+        damage,
+        attack_radius,
+        hit_speed,
+    ):
+        super().__init__(
+            owner, row, col,
+            hitpoints,
+            damage,
+            attack_radius,
+            hit_speed,
+        )
 
         self.width = width
         self.height = height
@@ -29,14 +38,6 @@ class Building(Entity):
                 self.size.y, 
             )
         )
-
-
-    def update(self, dt, arena_cell_occupancy) -> None:
-        raise NotImplementedError
-
-
-    def get_deploy_cost(self) -> int:
-        raise NotImplementedError
 
 
     def get_cell_occupancy_index(self) -> int:

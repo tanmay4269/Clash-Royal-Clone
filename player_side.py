@@ -1,4 +1,6 @@
-from entities.crown_tower import CrownTower
+from entities.buildings.king_tower import KingTower
+from entities.buildings.princess_tower import PrincessTower
+
 
 class PlayerSide:
     def __init__(self):
@@ -35,9 +37,9 @@ class PlayerSide1(PlayerSide):
         super().__init__()
         self.side_index = 1
 
-        self.king_tower = CrownTower(self, 3, 18/2, 2.5, 2.5)
-        self.princess_tower_1 = CrownTower(self, 6.5, 3.5, 2, 2)
-        self.princess_tower_2 = CrownTower(self, 6.5, 18 - 3.5, 2, 2)
+        self.king_tower = KingTower(self, 3, 18/2, 2.5, 2.5)
+        self.princess_tower_1 = PrincessTower(self, 6.5, 3.5, 2, 2)
+        self.princess_tower_2 = PrincessTower(self, 6.5, 18 - 3.5, 2, 2)
 
         self.objects = [
             self.king_tower, self.princess_tower_1, self.princess_tower_2
@@ -49,9 +51,9 @@ class PlayerSide2(PlayerSide):
         super().__init__()
         self.side_index = 2
 
-        self.king_tower = CrownTower(self, 32 - 3, 18/2, 2.5, 2.5)
-        self.princess_tower_1 = CrownTower(self, 32 - 6.5, 3.5, 2, 2)
-        self.princess_tower_2 = CrownTower(self, 32 - 6.5, 18 - 3.5, 2, 2)
+        self.king_tower = KingTower(self, 32 - 3, 18/2, 2.5, 2.5)
+        self.princess_tower_1 = PrincessTower(self, 32 - 6.5, 3.5, 2, 2)
+        self.princess_tower_2 = PrincessTower(self, 32 - 6.5, 18 - 3.5, 2, 2)
         
         self.objects = [
             self.king_tower, self.princess_tower_1, self.princess_tower_2

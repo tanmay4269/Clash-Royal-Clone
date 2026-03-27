@@ -1,8 +1,4 @@
-from typing import List, Tuple
-import numpy as np
-
-import pygame
-from pygame import Vector2
+from utils import *
 
 from player_side import PlayerSide, PlayerSide1, PlayerSide2
 from entity import Entity
@@ -10,10 +6,7 @@ from entity import Entity
 from entities.building import Building
 from entities.troop import Troop
 
-from entities.crown_tower import CrownTower
-from entities.knight import Knight
-
-from utils import *
+from entities.troops.knight import Knight
 
 
 class Arena:

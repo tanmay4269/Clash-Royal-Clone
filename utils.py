@@ -1,3 +1,12 @@
+from typing import List, Tuple
+import numpy as np
+
+import pygame
+from pygame import Vector2
+
+
+""" logging
+
 import logging
 import sys
 
@@ -15,8 +24,9 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 # Example logs
-# logger.debug("Debug message")
-# logger.info("Info message")
-# logger.warning("Warning message")
-# logger.error("Error message")
-# logger.critical("Critical message")
+logger.debug("Debug message")
+logger.info("Info message")
+logger.warning("Warning message")
+logger.error("Error message")
+logger.critical("Critical message")
+"""

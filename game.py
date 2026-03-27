@@ -1,4 +1,4 @@
-import pygame
+from utils import *
 from arena import Arena
 
 

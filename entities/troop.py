@@ -1,34 +1,52 @@
-import pygame
-from pygame import Vector2
+from utils import *
 
-import numpy as np
 import heapq
 from collections import deque
 
 from entity import Entity
 
-from utils import *
-
 
 class Troop(Entity):
     COLLISION_COEF  = 10.0  # This times the overlap while collision is applied to this object
-    FORCE_DECAY     = 0.8
+    FORCE_DECAY     = 0.8   # This is used to decay the acceleration per tick, assuming all forces are impulsive in the game
 
-    def __init__(self, owner, row, col, radius, speed, mass, attack_radius):
-        super().__init__(owner, row, col)
+    def __init__(
+        self, owner, row, col, 
+        radius, 
+        speed, 
+        mass, 
+        hitpoints,
+        damage,
+        attack_radius,
+        hit_speed,
+    ):
+        """
+        speed: ??   # TODO: what units are these
+        mass: in kg, used to calculate acceleration by a force
+        """
+
+        super().__init__(
+            owner, row, col,
+            hitpoints,
+            damage,
+            attack_radius,
+            hit_speed,
+        )
+        
+        # Physical Attributes
         self.radius = radius
         self.size = self.radius * 16
         self.position -= Vector2(self.size, self.size)  # Position adjusting to center to the cell
 
         self.mass = mass
 
+        # Movement Attributes
         self.speed = speed 
         self.velocity = Vector2()
         self.acceleration = Vector2()
         
-        self.attack_radius_cells = attack_radius * 16
-
-        self.target = None  # Vector2 or None
+        # Navigation Attributes
+        self.target = None  # Entity or None
         self.waypoint_reached_dist = 1.0
         self.waypoints = deque()  # left to right is the traversal pattern. self.find_path populates this and update pops from this
 
@@ -39,22 +57,47 @@ class Troop(Entity):
                     self.cell_occupancy[r, c] = True
 
 
-    def render(self, screen, color) -> None:
-        pygame.draw.circle(screen, color, self.position, self.size) #, width=2)
+    def get_deploy_cost(self) -> int:
+        raise NotImplementedError
 
+
+    def render(self, screen, color) -> None:
+        # Body
+        pygame.draw.circle(screen, color, self.position, self.size)
+
+        # Health Bar
+        pygame.draw.line(
+            screen, 
+            color, 
+            self.position + Vector2(-20, -self.size - 10),
+            self.position + Vector2( 20, -self.size - 10),
+            width=2
+        )
+
+        ### * Debug * ###
+
+        # Attack radius
+        pygame.draw.circle(screen, "black", self.position, self.attack_radius_cells, width=1)
+
+        # Waypoints
         # for i in range(len(self.waypoints)-1):
         #     pygame.draw.line(screen, "green", self.waypoints[i], self.waypoints[i+1], width=1)
 
 
-    def update(self, dt, arena_cell_occupancy) -> None:
+    def update(self, dt, arena_cell_occupancy) -> bool:
         """
         If target is not None, pathfind to that and take incremental steps towards it
         Else set target to the closest compatable victim 
         """
 
-        # if self.target is None:
-        #     self.set_target()
-        #     self.find_path(arena_cell_occupancy)
+        ### Combat Mechanics ###
+        if self.health < 0:
+            return False
+
+        self.attack_mechanics()
+        self._attack_timer += dt
+
+        ### Navigation ###
 
         # Every tick, update target and path to it
         #   FIXME Wasteful approach, need to do something smarter
@@ -63,7 +106,7 @@ class Troop(Entity):
 
         if len(self.waypoints) == 0:
             self.target = None
-            return
+            return True
         
         displacement = self.waypoints[0] - self.position
 
@@ -72,17 +115,17 @@ class Troop(Entity):
 
         self.velocity = displacement.normalize() * self.speed
 
-
-        # TODO: I forgot the optimal ordering here
         self.velocity += dt * self.acceleration
         self.position += dt * self.velocity
 
-        self.acceleration *= Troop.FORCE_DECAY  # ! Assuming all forces are impulsive in the game
+        self.acceleration *= Troop.FORCE_DECAY  # * Assuming all forces are impulsive in the game
+
+        return True
 
 
-    def get_deploy_cost(self) -> int:
-        raise NotImplementedError
-
+    ############################
+    ### Navigation Mechanics ###
+    ############################
 
     def set_target(self, target=None):
         """
@@ -105,24 +148,7 @@ class Troop(Entity):
 
         assert(closest_obj is not None)
 
-        self.target = closest_obj.position
-
-
-
-    def get_cell_occupancy_index(self):
-        return 3
-
-
-    def get_cell_occupancy(self):
-        return np.ones([1, 1]) * self.get_cell_occupancy_index(), self.position - Vector2(self.size, self.size)
-        # return self.cell_occupancy * self.get_cell_occupancy_index(), self.position - Vector2(self.size, self.size)
-
-
-    def apply_force(self, force: Vector2) -> None:
-        self.acceleration += force / self.mass
-
-        # Hacky -- Doesn't look great
-        # self.position += force.normalize() * 0.5
+        self.target = closest_obj
 
 
     def find_path(self, occupancy_grid: np.ndarray) -> bool:
@@ -147,7 +173,7 @@ class Troop(Entity):
         )
 
         start = (int(self.position.x / SCALE), int(self.position.y / SCALE))
-        target = (int(self.target.x / SCALE), int(self.target.y / SCALE))
+        target = (int(self.target.position.x / SCALE), int(self.target.position.y / SCALE))
 
         path = self.a_star(tiled_occupancy_grid, start, target)
 
@@ -208,4 +234,36 @@ class Troop(Entity):
                     heapq.heappush(open_set, (f, neighbor))
 
         return None  # No path found
+
+
+    def get_cell_occupancy_index(self):
+        return 3
+
+
+    def get_cell_occupancy(self):
+        return np.ones([1, 1]) * self.get_cell_occupancy_index(), self.position - Vector2(self.size, self.size)
+        # return self.cell_occupancy * self.get_cell_occupancy_index(), self.position - Vector2(self.size, self.size)
+
+
+    def apply_force(self, force: Vector2) -> None:
+        self.acceleration += force / self.mass
+
+        # Hacky -- Doesn't look great
+        # self.position += force.normalize() * 0.5
+
+
+    ########################
+    ### Combat Mechanics ###
+    ########################
+
+    def attack_mechanics(self) -> None:
+        """
+        target is reused from self.target
+        """
+
+        if self._attack_timer < self.hit_speed:
+            return
+
+        self._attack_timer = 0  # Reset
+        self.target.apply_damage(self.damage)
 
