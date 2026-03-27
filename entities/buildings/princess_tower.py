@@ -21,7 +21,7 @@ class PrincessTower(CrownTower):
         if self.owner.side_index == 1:
             color = "red"
         else:
-            color = "blue"
+            color = LIGHT_BLUE
 
         super().render(screen, color)
 

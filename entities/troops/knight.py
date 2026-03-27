@@ -15,6 +15,9 @@ class Knight(Troop):
             hit_speed=1.2
         )
         
+        # self.sprite = pygame.image.load("assets/knight.png")
+        # self.sprite = pygame.transform.scale(self.sprite, 2 * Vector2(self.size, self.size))
+
 
     def get_deploy_cost(self) -> int:
         return 3
@@ -24,7 +27,12 @@ class Knight(Troop):
         if self.owner.side_index == 1:
             color = "red"
         else:
-            color = "blue"
+            color = LIGHT_BLUE
 
         super().render(screen, color)
 
+        # screen.blit(self.sprite, self.position - Vector2(self.size, self.size))
+
+        font = pygame.font.SysFont(None, 12)
+        text = font.render("K", True, (0, 0, 0))  # text, antialias, color
+        screen.blit(text, self.position - Vector2(3, 3))

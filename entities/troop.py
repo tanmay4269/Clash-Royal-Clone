@@ -59,26 +59,30 @@ class Troop(Entity):
     def render(self, screen, color) -> None:
         # Body
         pygame.draw.circle(screen, color, self.position, self.size)
+        pygame.draw.circle(screen, "black", self.position, self.size, width=1)
 
         # Health Bar
         health_bar_length = 30 * (self.health / self.hitpoints)
 
-        pygame.draw.line(
-            screen, 
-            color, 
-            self.position + Vector2(-15, -self.size - 15),
-            self.position + Vector2(-15 + health_bar_length, -self.size - 15),
-            width=2
+        shape = (
+            self.position.x - 15,
+            self.position.y - self.size - 15,
+            health_bar_length,
+            4
         )
+
+        pygame.draw.rect(screen, color, shape)
+        pygame.draw.rect(screen, "black", shape, width=1)
 
         ### * Debug * ###
 
-        # Attack radius
-        pygame.draw.circle(screen, "black", self.position, self.attack_radius_cells, width=1)
+        if False:
+            # Attack radius
+            pygame.draw.circle(screen, "black", self.position, self.attack_radius_cells, width=1)
 
-        # Waypoints
-        for i in range(len(self.waypoints)-1):
-            pygame.draw.line(screen, "green", self.waypoints[i], self.waypoints[i+1], width=1)
+            # Waypoints
+            for i in range(len(self.waypoints)-1):
+                pygame.draw.line(screen, "green", self.waypoints[i], self.waypoints[i+1], width=1)
 
 
     def update(self, dt, arena_cell_occupancy) -> bool:

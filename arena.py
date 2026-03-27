@@ -106,7 +106,11 @@ class Arena:
         screen.blit(surface, (tile_x * self.tile_size, tile_y * self.tile_size))
  
 
-    def update(self, dt) -> None:
+    def update(self, dt) -> bool:
+        """
+        retur: False means game over
+        """
+
         # Checking for collisions and pushing them away
         #   Makes a reasonable simplifying assumption that buildings are rects and troops are circles
         # TODO: Maybe much later I implement spacial proximity based approach. If things lag, this could be an optimisation
@@ -155,8 +159,18 @@ class Arena:
             elif obj.owner.side_index == 2:
                 self.player_side_2.remove_object(obj)
             
+            if obj == self.player_side_1.king_tower:
+                print("Player 2 won!")
+                return False
+            elif obj == self.player_side_2.king_tower:
+                print("Player 1 won!")
+                return False
+
             self.objects.remove(obj)
             del obj
+
+        
+        return True
 
 
     def on_click(self) -> None:
@@ -165,7 +179,6 @@ class Arena:
         tile_col = mouse_x // self.tile_size
 
         # * DEBUG * 
-        print(f"Spawning knight from side: {self._debug_active_player}")
         if self._debug_active_player == 1:
             knight = Knight(self.player_side_1, tile_row + 1, tile_col + 1)
             self.player_side_1.add_object(knight)

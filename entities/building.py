@@ -43,19 +43,21 @@ class Building(Entity):
         # Health Bar
         health_bar_length = 30 * (self.health / self.hitpoints)
 
-        pygame.draw.line(
-            screen, 
-            color, 
-            self.position + Vector2(-15, -self.size.y/2 - 15),
-            self.position + Vector2(-15 + health_bar_length, -self.size.y/2 - 15),
-            width=2
+        shape = (
+            self.position.x - 15,
+            self.position.y - self.size.y/2 - 15,
+            health_bar_length,
+            4
         )
-        
+
+        pygame.draw.rect(screen, color, shape)
+        pygame.draw.rect(screen, "black", shape, width=1)
 
         ### * DEBUG * ###
 
-        # Attack radius
-        pygame.draw.circle(screen, "black", self.position, self.attack_radius_cells, width=1)
+        if False:
+            # Attack radius
+            pygame.draw.circle(screen, "black", self.position, self.attack_radius_cells, width=1)
 
 
     def get_cell_occupancy_index(self) -> int:

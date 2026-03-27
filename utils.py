@@ -5,6 +5,8 @@ import pygame
 from pygame import Vector2
 
 
+LIGHT_BLUE = "#8BCEF7"
+
 """ logging
 
 import logging

@@ -1,6 +1,9 @@
 from utils import *
 from arena import Arena
 
+import psutil
+import os
+
 
 class Game:
     def __init__(self):
@@ -38,7 +41,9 @@ class Game:
                     print("Setting active player to `2`")
 
         self.arena.render(self.screen)
-        self.arena.update(self.dt)
+        if not self.arena.update(self.dt):
+            self.running = False
+            return
 
         # flip() the display to put your work on screen
         pygame.display.flip()
@@ -47,6 +52,15 @@ class Game:
         # dt is delta time in seconds since last frame, used for framerate-
         # independent physics.
         self.dt = self.clock.tick(60) / 1000
+
+        ### * DEBUG * ###
+        if False:
+        # if True:
+            process = psutil.Process(os.getpid())
+            memory = process.memory_info().rss  # in bytes
+
+            print(f"FPS: {self.clock.get_fps():.2f}\t RAM Usage: {memory / 1024 / 1024:.2f} MB")
+
 
     def run(self):
         while self.running:
