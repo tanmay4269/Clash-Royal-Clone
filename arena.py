@@ -196,7 +196,7 @@ class Arena:
         """
 
         # 1. Check if player has enough elixir
-        if deploy_me.owner.elixirs < deploy_me.get_deploy_cost():
+        if deploy_me.owner.elixirs < deploy_me.deploy_cost:
             return False
         
         # 2. Check if the deploy location (already written into the object, 
@@ -210,7 +210,7 @@ class Arena:
 
         # 4. Subtract player's elixirs and return True
         # * DEBUG *
-        # deploy_me.owner.elixirs -= deploy_me.get_deploy_cost()
+        # deploy_me.owner.elixirs -= deploy_me.deploy_cost
         return True
 
 

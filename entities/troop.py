@@ -11,6 +11,7 @@ class Troop(Entity):
 
     def __init__(
         self, owner, row, col, 
+        deploy_cost,
         radius, 
         speed, 
         mass, 
@@ -26,6 +27,7 @@ class Troop(Entity):
 
         super().__init__(
             owner, row, col,
+            deploy_cost,
             hitpoints,
             damage,
             attack_radius,

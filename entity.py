@@ -6,6 +6,7 @@ class Entity:
 
     def __init__(
         self, owner, row, col,
+        deploy_cost,
         hitpoints,
         damage,
         attack_radius,
@@ -25,6 +26,8 @@ class Entity:
         self.row = row
         self.col = col
 
+        self.deploy_cost = deploy_cost
+
         self.position = Vector2(col * 16, row * 16)  # TODO: remove the hardcoding
 
         self.is_alive = True
@@ -38,11 +41,6 @@ class Entity:
         self.hit_speed = hit_speed
 
         self._attack_timer = 0
-
-
-    def get_deploy_cost(self) -> int:
-        # TODO: migrate to just a public variable
-        raise NotImplementedError
 
 
     def render(self, screen) -> None:

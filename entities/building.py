@@ -5,6 +5,7 @@ from entity import Entity
 class Building(Entity):
     def __init__(
         self, owner, row: int, col: int, 
+        deploy_cost: int,
         width: int, height: int,
         hitpoints,
         damage,
@@ -13,6 +14,7 @@ class Building(Entity):
     ):
         super().__init__(
             owner, row, col,
+            deploy_cost,
             hitpoints,
             damage,
             attack_radius,

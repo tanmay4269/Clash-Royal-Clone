@@ -13,6 +13,7 @@ class CrownTower(Building):
     ):
         super().__init__(
             owner, row, col,
+            0,  # deploy cost
             width, height,
             hitpoints,
             damage,
@@ -20,8 +21,4 @@ class CrownTower(Building):
             hit_speed,
         )
 
-    
-    def get_deploy_cost(self) -> int:
-        return 0
-    
     
