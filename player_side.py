@@ -2,6 +2,7 @@ from entities.crown_tower import CrownTower
 
 class PlayerSide:
     def __init__(self):
+        self.side_index = None
         self.opponent = None
 
         self.king_tower = None
@@ -32,6 +33,7 @@ class PlayerSide:
 class PlayerSide1(PlayerSide):
     def __init__(self):
         super().__init__()
+        self.side_index = 1
 
         self.king_tower = CrownTower(self, 3, 18/2, 2.5, 2.5)
         self.princess_tower_1 = CrownTower(self, 6.5, 3.5, 2, 2)
@@ -45,6 +47,7 @@ class PlayerSide1(PlayerSide):
 class PlayerSide2(PlayerSide):
     def __init__(self):
         super().__init__()
+        self.side_index = 2
 
         self.king_tower = CrownTower(self, 32 - 3, 18/2, 2.5, 2.5)
         self.princess_tower_1 = CrownTower(self, 32 - 6.5, 3.5, 2, 2)

@@ -8,7 +8,7 @@ from player_side import PlayerSide, PlayerSide1, PlayerSide2
 from entity import Entity
 
 from entities.building import Building
-from entities.troup import Troup
+from entities.troop import Troop
 
 from entities.crown_tower import CrownTower
 from entities.knight import Knight
@@ -30,7 +30,7 @@ class Arena:
         #   0 => Unoccupied
         #   1 => Permanent occupancy
         #   2 => Building
-        #   3 => Troup
+        #   3 => Troop
         # TODO: This should be its own class coz I later also wanna implement an `on_update`
         #   that depends on this matrix being updated and only upon update down stream recomputation occurs
         self.cell_occupancy = np.zeros(
@@ -60,6 +60,10 @@ class Arena:
         towers = self.player_side_1.get_objects() + self.player_side_2.get_objects()
         for obj in towers:
             self.deploy_entity(obj)
+
+
+        # * DEBUG *
+        self._debug_active_player = 1  # For spawning the troop on the right side of the arena
 
     
     def render(self, screen, render_cell_occupancy=True) -> None:
@@ -119,28 +123,28 @@ class Arena:
                 if obj_i == obj_j:
                     continue
 
-                if not isinstance(obj_j, Troup):
+                if not isinstance(obj_j, Troop):
                     continue
 
                 if isinstance(obj_i, Building):
-                    # Building-troup collision
+                    # Building-troop collision
                     delta = obj_i.position - obj_j.position
                     overlap = (obj_i.size / 2 + Vector2(obj_j.size, obj_j.size)) - Vector2(abs(delta.x), abs(delta.y))
 
                     if overlap.x < 0 or overlap.y < 0:
                         continue
 
-                    force = -delta.normalize() * overlap.length() * Troup.COLLISION_COEF
+                    force = -delta.normalize() * overlap.length() * Troop.COLLISION_COEF
                     obj_j.apply_force(force)
                 else: 
-                    # Troup-troup collision
+                    # Troop-troop collision
                     delta = obj_i.position - obj_j.position
                     overlap = (obj_i.size + obj_j.size) - delta.length()
 
                     if overlap < 0:
                         continue
 
-                    force = delta.normalize() * overlap * Troup.COLLISION_COEF
+                    force = delta.normalize() * overlap * Troop.COLLISION_COEF
                     obj_i.apply_force(force)
                     obj_j.apply_force(-force)
 
@@ -155,10 +159,14 @@ class Arena:
         tile_col = mouse_x // self.tile_size
 
         # * DEBUG * 
-        knight = Knight(self.player_side_2, tile_row + 1, tile_col + 1)
-        self.player_side_2.add_object(knight)
-        # knight.set_target(knight.owner.opponent.king_tower.position)
-        # knight.find_path(self.cell_occupancy)
+        print(f"Spawning knight from side: {self._debug_active_player}")
+        if self._debug_active_player == 1:
+            knight = Knight(self.player_side_1, tile_row + 1, tile_col + 1)
+            self.player_side_1.add_object(knight)
+        else:
+            knight = Knight(self.player_side_2, tile_row + 1, tile_col + 1)
+            self.player_side_2.add_object(knight)
+        
 
         if self.deploy_entity(knight) is False:
             print("Failed deploying knight")
@@ -214,7 +222,7 @@ class Arena:
         for bg_layer in range(1, Entity.CELL_OCCUPANCY_LAYERS+1):
             for fg_layer in range(bg_layer, Entity.CELL_OCCUPANCY_LAYERS+1):
                 if bg_layer == 3 and bg_layer == fg_layer:
-                    continue   # Don't check for troup-troup deployment constraint
+                    continue   # Don't check for troop-troop deployment constraint
                 tmp_mask_layer  = np.where(tmp_mask == bg_layer, True, False)
                 mask_layer      = np.where(mask == fg_layer, True, False)
 

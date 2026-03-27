@@ -24,9 +24,18 @@ class Game:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+            
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1: # Left mouse button
                     self.arena.on_click()
+            
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_1:
+                    self.arena._debug_active_player = 1
+                    print("Setting active player to `1`")
+                elif event.key == pygame.K_2:
+                    self.arena._debug_active_player = 2
+                    print("Setting active player to `2`")
 
         self.arena.render(self.screen)
         self.arena.update(self.dt)

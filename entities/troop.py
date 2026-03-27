@@ -10,7 +10,7 @@ from entity import Entity
 from utils import *
 
 
-class Troup(Entity):
+class Troop(Entity):
     COLLISION_COEF  = 10.0  # This times the overlap while collision is applied to this object
     FORCE_DECAY     = 0.8
 
@@ -39,22 +39,27 @@ class Troup(Entity):
                     self.cell_occupancy[r, c] = True
 
 
-    def render(self, screen) -> None:
-        # pygame.draw.circle(screen, "black", self.position - Vector2(self.size, self.size), self.size, width=2)
-        pygame.draw.circle(screen, "black", self.position, self.size, width=2)
+    def render(self, screen, color) -> None:
+        pygame.draw.circle(screen, color, self.position, self.size) #, width=2)
 
-        for i in range(len(self.waypoints)-1):
-            pygame.draw.line(screen, "green", self.waypoints[i], self.waypoints[i+1], width=5)
+        # for i in range(len(self.waypoints)-1):
+        #     pygame.draw.line(screen, "green", self.waypoints[i], self.waypoints[i+1], width=1)
 
 
     def update(self, dt, arena_cell_occupancy) -> None:
-        # If target is not None, pathfind to that and take incremental steps towards it
-        # Else set target to the closest compatable victim 
+        """
+        If target is not None, pathfind to that and take incremental steps towards it
+        Else set target to the closest compatable victim 
+        """
 
-        if self.target is None:
-            self.set_target()
-            self.find_path(arena_cell_occupancy)
-            return 
+        # if self.target is None:
+        #     self.set_target()
+        #     self.find_path(arena_cell_occupancy)
+
+        # Every tick, update target and path to it
+        #   FIXME Wasteful approach, need to do something smarter
+        self.set_target()
+        self.find_path(arena_cell_occupancy)
 
         if len(self.waypoints) == 0:
             self.target = None
@@ -72,7 +77,7 @@ class Troup(Entity):
         self.velocity += dt * self.acceleration
         self.position += dt * self.velocity
 
-        self.acceleration *= Troup.FORCE_DECAY  # ! Assuming all forces are impulsive in the game
+        self.acceleration *= Troop.FORCE_DECAY  # ! Assuming all forces are impulsive in the game
 
 
     def get_deploy_cost(self) -> int:

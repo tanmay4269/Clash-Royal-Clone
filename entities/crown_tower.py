@@ -11,9 +11,12 @@ class CrownTower(Building):
         super().__init__(owner, row, col, width, height)
 
     def render(self, screen) -> None:
-        # super().render(screen, "gray")
-        return 
+        if self.owner.side_index == 1:
+            color = "red"
+        else:
+            color = "blue"
 
+        super().render(screen, color)
 
     def update(self, dt, arena_cell_occupancy) -> None:
         # TODO: shooting mechanics yet to be implemented

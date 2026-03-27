@@ -34,7 +34,7 @@ class Entity:
         0 => Unoccupied
         1 => Permanent occupancy
         2 => Building
-        3 => Troup
+        3 => Troop
         """
         return 0
 
