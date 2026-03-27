@@ -87,12 +87,8 @@ class Troop(Entity):
         Else set target to the closest compatable victim 
         """
 
-        ### Combat Mechanics ###
         if self.health < 0:
             return False
-
-        self.attack_mechanics()
-        self._attack_timer += dt
 
         ### Navigation ###
         self.velocity = Vector2()  # Reset velocity each tick. 
@@ -102,8 +98,20 @@ class Troop(Entity):
         #   FIXME Wasteful approach, need to do something smarter
         self.set_target()
         
-        # If the target is out of reach, navigate to it
-        if (self.position - self.target.position).length() > self.attack_radius_cells:
+        # If the target is in reach, navigate to it
+        target_size = 0
+        if isinstance(self.target.size, Vector2):
+            # ! Hacky way to know if its a rectangular target
+            #   but its established that only rects and circles are gonna be there 
+            #   and buildings are only rects and troops are just circles
+            delta = self.target.position - self.position
+            overlap = (self.target.size / 2 + Vector2(self.size, self.size)) - Vector2(abs(delta.x), abs(delta.y))
+
+            target_size = self.target.size[0 if overlap.x < overlap.y else 1] / 2
+        else:
+            target_size = self.target.size
+
+        if (self.position - self.target.position).length() > self.attack_radius_cells + target_size:
             self.find_path(arena_cell_occupancy)
 
             if len(self.waypoints) == 0:
@@ -121,6 +129,13 @@ class Troop(Entity):
         self.position += dt * self.velocity
 
         self.acceleration *= Troop.FORCE_DECAY  # * Assuming all forces are impulsive in the game
+        
+
+        ### Combat Mechanics ###
+        if (self.position - self.target.position).length() < self.attack_radius_cells + target_size: 
+            self.attack_mechanics() 
+            self._attack_timer += dt
+
 
         return True
 

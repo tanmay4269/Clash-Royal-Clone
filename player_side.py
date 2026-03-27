@@ -42,7 +42,8 @@ class PlayerSide1(PlayerSide):
         self.side_index = 1
 
         self.king_tower = KingTower(self, 3, 18/2, 2.5, 2.5)
-        self.princess_tower_1 = PrincessTower(self, 6.5, 3.5, 2, 2)
+        # self.princess_tower_1 = PrincessTower(self, 6.5, 3.5, 2, 2)
+        self.princess_tower_1 = PrincessTower(self, 6.5, 3.5, 3, 2)
         self.princess_tower_2 = PrincessTower(self, 6.5, 18 - 3.5, 2, 2)
 
         self.objects = {

@@ -22,7 +22,7 @@ class Building(Entity):
         self.width = width
         self.height = height
 
-        self.size = Vector2(self.height * 16, self.width * 16)
+        self.size = Vector2(self.width * 16, self.height * 16)
 
         self.position.x = self.col * 16 
         self.position.y = self.row * 16 
@@ -50,6 +50,12 @@ class Building(Entity):
             self.position + Vector2(-15 + health_bar_length, -self.size.y/2 - 15),
             width=2
         )
+        
+
+        ### * DEBUG * ###
+
+        # Attack radius
+        pygame.draw.circle(screen, "black", self.position, self.attack_radius_cells, width=1)
 
 
     def get_cell_occupancy_index(self) -> int:

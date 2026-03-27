@@ -28,6 +28,9 @@ class PrincessTower(CrownTower):
 
     def update(self, dt, arena_cell_occupancy) -> bool:
         # TODO: shooting mechanics yet to be implemented
+        if self.health < 0:
+            return False
+
         return True
 
 

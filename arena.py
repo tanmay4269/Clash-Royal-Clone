@@ -108,7 +108,7 @@ class Arena:
 
     def update(self, dt) -> None:
         # Checking for collisions and pushing them away
-        #   Makes a reasonable simplifying assumption that buildings are rects and troups are circles
+        #   Makes a reasonable simplifying assumption that buildings are rects and troops are circles
         # TODO: Maybe much later I implement spacial proximity based approach. If things lag, this could be an optimisation
         # TODO: Put this in another method
         for obj_i in self.objects:
