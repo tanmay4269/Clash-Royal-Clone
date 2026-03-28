@@ -1,4 +1,5 @@
 from utils import *
+from collections import deque
 
 from player_side import PlayerSide, PlayerSide1, PlayerSide2
 from entity import Entity
@@ -19,7 +20,8 @@ class Arena:
         self.width = 18  # In tiles
         self.height = 32
 
-        self.objects: Set[Entity] = set()  # Contains all in game objects like buildings, troupes, etc.
+        self.objects: Set[Entity] = set()  # Contains all in game objects that have been deployed like buildings, troupes, etc.
+        self.deploy_buffer = set()         # Contains items that haven't deployed yet but need to be rendered
 
         # Occupancy Grid
         #   0 => Unoccupied
@@ -97,6 +99,9 @@ class Arena:
         for obj in self.objects:
             obj.render(screen)
 
+        for obj in self.deploy_buffer:
+            obj.render(screen)
+
         
         # Highlighted cell under the cursor
         (mouse_x, mouse_y) = pygame.mouse.get_pos()
@@ -114,8 +119,9 @@ class Arena:
         retur: False means game over
         """
 
-        # Checking for collisions and pushing them away
-        #   Makes a reasonable simplifying assumption that buildings are rects and troops are circles
+        ### Collision Management ###
+
+        # Makes a reasonable simplifying assumption that buildings are rects and troops are circles
         # TODO: Maybe much later I implement spacial proximity based approach. If things lag, this could be an optimisation
         # TODO: Put this in another method
         for obj_i in self.objects:
@@ -148,6 +154,20 @@ class Arena:
                     obj_i.apply_force(force)
                     obj_j.apply_force(-force)
 
+
+        ### Deploy Buffer Management ###
+        
+        deployed_objs = set()
+        for obj in self.deploy_buffer:
+            if obj.has_deployed(dt):
+                deployed_objs.add(obj)
+        
+        for obj in deployed_objs:
+            self.objects.add(obj)
+            self.deploy_buffer.remove(obj)
+
+
+        ### Object Update and Deletion ###
 
         dead_objs = set()
         for obj in self.objects:
@@ -210,7 +230,8 @@ class Arena:
             return False
 
         # 3. Add to self.objects
-        self.objects.add(deploy_me)
+        # self.objects.add(deploy_me)
+        self.deploy_buffer.add(deploy_me)
 
         # 4. Subtract player's elixirs and return True
         # * DEBUG *

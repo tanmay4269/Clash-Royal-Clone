@@ -20,22 +20,25 @@ class Entity:
 
     def __init__(
         self, owner, row, col,
-        deploy_cost, 
+        deploy_cost, deploy_delay,
         entity_type: EntityType,
         hitpoints,
         damage,
         attack_radius,
-        hit_speed,
+        hit_speed, first_hit_speed,
         target_types: Set[EntityType],
     ):
         """
         owner: of type PlayerSide
         row, col: in tiles
         deploy_cost: in elexirs
+        deploy_delay: in sec. Time between placing an entity and it actually starting 
+            to do its thing. Nothing interacts with it in this phase.
         entity_type: of type EntityType
         hitpoints: health
         damage: attack damage per shot
         hit_speed: in sec
+        first_hit_speed: in sec
         target_types: set of EntityType, only these types
             of enemies will be targeted
         """
@@ -54,22 +57,41 @@ class Entity:
 
         self.entity_type = entity_type
         self.deploy_cost = deploy_cost
+        self.deploy_delay = deploy_delay
 
         # Attack Attributes
         self.hitpoints = hitpoints  # The maximum health
         self.health = hitpoints     # The real time health
+
         self.damage = damage
         self.attack_radius_cells = attack_radius * 16
+        
         self.hit_speed = hit_speed
+        self.first_hit_speed = first_hit_speed
+        
         self.target_types = target_types  # Set of entity types
         if not isinstance(self.target_types, set):
             self.target_types = set({self.target_types})
 
+        # Private trackers
+        self._deploy_timer = 0
         self._attack_timer = 0
+        self._is_first_hit = False
 
 
     def render(self, screen) -> None:
         raise NotImplementedError
+
+
+    def has_deployed(self, dt) -> bool:
+        """
+        To be called before self.update has ever been called
+        """
+        if self._deploy_timer < self.deploy_delay:
+            self._deploy_timer += dt
+            return False
+        else:
+            return True
 
 
     def update(self, dt, arena_cell_occupancy) -> bool:
@@ -90,7 +112,9 @@ class Entity:
 
 
     def get_cell_occupancy(self):
-        # occupancy grid and top left position
+        """
+        occupancy grid and top left position
+        """
         raise NotImplementedError
 
 

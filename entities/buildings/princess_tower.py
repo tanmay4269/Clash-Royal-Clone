@@ -7,13 +7,16 @@ class PrincessTower(CrownTower):
         self, owner, row: int, col: int, 
         width: int, height: int,
     ):
+        """
+        Level 9
+        """
         super().__init__(
             owner, row, col,
             width, height,
             hitpoints=2534,
             damage=90,
             attack_radius=7.5,
-            hit_speed=0.8,
+            hit_speed=0.8, first_hit_speed=0.8
         )
 
     

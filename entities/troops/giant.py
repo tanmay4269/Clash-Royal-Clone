@@ -7,7 +7,7 @@ class Giant(Troop):
     def __init__(self, owner, row, col):
         super().__init__(
             owner, row, col, 
-            deploy_cost=5,
+            deploy_cost=5, deploy_delay=1.0,
             entity_type=EntityType.GROUND,
             radius=1.0, 
             speed=Troop.Speed.SLOW, 
@@ -15,7 +15,7 @@ class Giant(Troop):
             hitpoints=3968,
             damage=253,
             attack_radius=Troop.AttackRadius.MELEE_MEDIUM,
-            hit_speed=1.5,
+            hit_speed=1.5, first_hit_speed=0.5,
             target_types=EntityType.BUILDING,
         )
         

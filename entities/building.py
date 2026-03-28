@@ -6,22 +6,23 @@ class Building(Entity):
     def __init__(
         self, owner, row: int, col: int, 
         deploy_cost: int,
+        deploy_delay: float,
         entity_type,
         width: int, height: int,
         hitpoints,
         damage,
         attack_radius,
-        hit_speed,
+        hit_speed, first_hit_speed,
         target_types,
     ):
         super().__init__(
             owner, row, col,
-            deploy_cost,
+            deploy_cost, deploy_delay,
             entity_type,
             hitpoints,
             damage,
             attack_radius,
-            hit_speed,
+            hit_speed, first_hit_speed,
             target_types,
         )
 

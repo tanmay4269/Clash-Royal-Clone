@@ -7,7 +7,7 @@ class Knight(Troop):
     def __init__(self, owner, row, col):
         super().__init__(
             owner, row, col, 
-            deploy_cost=3,
+            deploy_cost=3, deploy_delay=1.0,
             entity_type=EntityType.GROUND,
             radius=0.5, 
             speed=Troop.Speed.MEDIUM,
@@ -15,7 +15,7 @@ class Knight(Troop):
             hitpoints=1766,
             damage=202,
             attack_radius=Troop.AttackRadius.MELEE_MEDIUM,
-            hit_speed=1.2,
+            hit_speed=1.2, first_hit_speed=0.5,
             target_types=EntityType.get_all(),
         )
         

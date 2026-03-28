@@ -22,7 +22,7 @@ class Troop(Entity):
 
     def __init__(
         self, owner, row, col, 
-        deploy_cost, 
+        deploy_cost, deploy_delay,
         entity_type,
         radius, 
         speed: Speed, 
@@ -30,7 +30,7 @@ class Troop(Entity):
         hitpoints,
         damage,
         attack_radius: AttackRadius,
-        hit_speed,
+        hit_speed, first_hit_speed,
         target_types,
     ):
         """
@@ -40,12 +40,12 @@ class Troop(Entity):
 
         super().__init__(
             owner, row, col,
-            deploy_cost, 
+            deploy_cost, deploy_delay,
             entity_type,
             hitpoints,
             damage,
             radius + attack_radius,
-            hit_speed,
+            hit_speed, first_hit_speed,
             target_types,
         )
         
@@ -93,8 +93,8 @@ class Troop(Entity):
 
         ### * Debug * ###
 
-        # if False:
-        if True:
+        if False:
+        # if True:
             # Attack radius
             pygame.draw.circle(screen, "black", self.position, self.attack_radius_cells, width=1)
 
@@ -113,14 +113,20 @@ class Troop(Entity):
             return False
 
         ### Navigation ###
-        self.velocity = Vector2()  # Reset velocity each tick. 
-            # ! Think this through
+        self.velocity = Vector2()  # Reset velocity each tick; TODO Think this through
 
         # Every tick, update target and path to it
-        #   FIXME Wasteful approach, need to do something smarter
+        #   TODO Wasteful approach, need to do something smarter
+        prev_target = self.target
         self.set_target()
+        if self.target != prev_target:
+            self._is_first_hit = True
+            self._attack_timer = 0  # Reset timer to discard stale delay from last attack
         
-        # If the target is in reach, navigate to it
+
+        ### If the target is in reach, navigate to it ###
+
+        # Get target size for better estimation of proximity
         target_size = 0
         if isinstance(self.target.size, Vector2):
             # ! Hacky way to know if its a rectangular target
@@ -133,8 +139,10 @@ class Troop(Entity):
         else:
             target_size = self.target.size
 
+        # Check target proximity
         if (self.position - self.target.position).length() > self.attack_radius_cells + target_size:
-            self.find_path(arena_cell_occupancy)
+            found_path = self.find_path(arena_cell_occupancy)
+            assert found_path, "Couldn't find a path"
 
             if len(self.waypoints) == 0:
                 self.target = None
@@ -147,6 +155,8 @@ class Troop(Entity):
 
             self.velocity = displacement.normalize() * self.speed
         
+
+        ### Physics Update ###
         self.velocity += dt * self.acceleration
         self.position += dt * self.velocity
 
@@ -187,7 +197,7 @@ class Troop(Entity):
                 closest_obj = obj
                 closest_dist = dist
 
-        assert(closest_obj is not None)
+        assert closest_obj is not None
 
         self.target = closest_obj
 
@@ -225,6 +235,8 @@ class Troop(Entity):
         for wp in path[1:-1]:
             self.waypoints.append(Vector2(wp) * SCALE + Vector2(SCALE/2, SCALE/2))
         self.waypoints.append(Vector2(path[-1]) * SCALE)  # Offset on the last waypoint looks awkward
+
+        return True
 
 
     def a_star(self, grid, start, goal):
@@ -302,9 +314,12 @@ class Troop(Entity):
         target is reused from self.target
         """
 
-        if self._attack_timer < self.hit_speed:
+        if self._is_first_hit and self._attack_timer < self.first_hit_speed:
+            return
+        elif not self._is_first_hit and self._attack_timer < self.hit_speed:
             return
 
+        self._is_first_hit = False
         self._attack_timer = 0  # Reset
         self.target.apply_damage(self.damage)
 

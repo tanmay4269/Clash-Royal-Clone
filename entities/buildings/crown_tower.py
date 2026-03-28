@@ -10,17 +10,18 @@ class CrownTower(Building):
         hitpoints,
         damage,
         attack_radius,
-        hit_speed,
+        hit_speed, first_hit_speed,
     ):
         super().__init__(
             owner, row, col,
             0,  # deploy cost
+            0,  # deploy delay
             EntityType.BUILDING,
             width, height,
             hitpoints,
             damage,
             attack_radius,
-            hit_speed,
+            hit_speed, first_hit_speed,
             EntityType.get_all()
         )
 

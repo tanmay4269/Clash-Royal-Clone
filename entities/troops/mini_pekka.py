@@ -7,7 +7,7 @@ class MiniPEKKA(Troop):
     def __init__(self, owner, row, col):
         super().__init__(
             owner, row, col, 
-            deploy_cost=4,
+            deploy_cost=4, deploy_delay=1.0,
             entity_type=EntityType.GROUND,
             radius=0.3, 
             speed=Troop.Speed.FAST, 
@@ -15,7 +15,7 @@ class MiniPEKKA(Troop):
             hitpoints=1390,
             damage=755,
             attack_radius=Troop.AttackRadius.MELEE_SHORT,
-            hit_speed=1.6,
+            hit_speed=1.6, first_hit_speed=0.5,
             target_types=EntityType.get_all(),
         )
         
@@ -30,4 +30,4 @@ class MiniPEKKA(Troop):
 
         font = pygame.font.SysFont(None, 12)
         text = font.render("M", True, (0, 0, 0))  # text, antialias, color
-        screen.blit(text, self.position - Vector2(3, 3))
+        screen.blit(text, self.position - Vector2(3, 14))
