@@ -83,9 +83,11 @@ class Entity:
         raise NotImplementedError
 
 
-    def has_deployed(self, dt) -> bool:
+    def has_deployed(self, dt=0.0) -> bool:
         """
         To be called before self.update has ever been called
+        
+        dt: used to update the timer
         """
         if self._deploy_timer < self.deploy_delay:
             self._deploy_timer += dt

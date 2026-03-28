@@ -74,6 +74,19 @@ class Troop(Entity):
 
 
     def render(self, screen, color) -> None:
+        if not self.has_deployed():
+            smooth_arc(screen, "black", 
+                pygame.Rect(
+                    self.position.x - self.size - 2,
+                    self.position.y - self.size - 2,
+                    self.size * 2 + 4, 
+                    self.size * 2 + 4, 
+                ),
+                start_angle= -np.pi/2,
+                stop_angle= -np.pi/2 + 2 * np.pi * np.clip(self._deploy_timer / self.deploy_delay, 0.0, 1.0),
+                width=2
+            )
+
         # Body
         pygame.draw.circle(screen, color, self.position, self.size)
         pygame.draw.circle(screen, "black", self.position, self.size, width=1)
