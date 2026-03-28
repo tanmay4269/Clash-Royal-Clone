@@ -4,6 +4,8 @@ import numpy as np
 import pygame
 from pygame import Vector2
 
+from entity import EntityType
+
 
 LIGHT_BLUE = "#8BCEF7"
 

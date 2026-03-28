@@ -5,7 +5,6 @@ class EntityType:
     GROUND      = 1
     AIR         = 2
     BUILDING    = 3
-    PROJECTILE  = 4
 
     def get_all():
         return set({

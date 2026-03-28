@@ -1,6 +1,5 @@
 from utils import *
 from entities.building import Building
-from entity import EntityType
 
 
 class CrownTower(Building):

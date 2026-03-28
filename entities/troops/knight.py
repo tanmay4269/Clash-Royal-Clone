@@ -1,6 +1,6 @@
 from utils import *
 from entities.troop import Troop
-from entity import EntityType
+
 
 
 class Knight(Troop):
