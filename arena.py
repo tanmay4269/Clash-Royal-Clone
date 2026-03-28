@@ -8,6 +8,7 @@ from entities.troop import Troop
 
 from entities.troops.knight import Knight
 from entities.troops.giant import Giant
+from entities.troops.mini_pekka import MiniPEKKA
 
 
 class Arena:
@@ -58,7 +59,7 @@ class Arena:
 
         # * DEBUG *
         self._debug_active_player = 1  # For spawning the troop on the right side of the arena
-        self._debug_active_card = Giant
+        self._debug_active_card = MiniPEKKA
 
     
     def render(self, screen, render_cell_occupancy=True) -> None:

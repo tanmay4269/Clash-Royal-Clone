@@ -2,10 +2,10 @@ from utils import *
 
 
 class EntityType:
-    GROUND = 1
-    AIR = 2
-    BUILDING = 3
-    PROJECTILE = 4
+    GROUND      = 1
+    AIR         = 2
+    BUILDING    = 3
+    PROJECTILE  = 4
 
     def get_all():
         return set({
@@ -31,9 +31,13 @@ class Entity:
         """
         owner: of type PlayerSide
         row, col: in tiles
+        deploy_cost: in elexirs
+        entity_type: of type EntityType
         hitpoints: health
         damage: attack damage per shot
         hit_speed: in sec
+        target_types: set of EntityType, only these types
+            of enemies will be targeted
         """
 
         # Abstract Attributes

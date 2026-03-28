@@ -10,11 +10,11 @@ class Knight(Troop):
             deploy_cost=3,
             entity_type=EntityType.GROUND,
             radius=0.5, 
-            speed=10.0, 
+            speed=Troop.Speed.MEDIUM,
             mass=1.0, 
             hitpoints=1766,
             damage=202,
-            attack_radius=0.75,
+            attack_radius=Troop.AttackRadius.MELEE_MEDIUM,
             hit_speed=1.2,
             target_types=EntityType.get_all(),
         )

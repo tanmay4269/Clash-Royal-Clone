@@ -9,16 +9,27 @@ class Troop(Entity):
     COLLISION_COEF  = 10.0  # This times the overlap while collision is applied to this object
     FORCE_DECAY     = 0.8   # This is used to decay the acceleration per tick, assuming all forces are impulsive in the game
 
+    class Speed:
+        # TODO: units?
+        SLOW   = 5.0
+        MEDIUM = 10.0
+        FAST   = 15.0
+
+    class AttackRadius:
+        # Units: Tiles more than the troop radius
+        MELEE_SHORT  = 0.15
+        MELEE_MEDIUM = 0.25  
+
     def __init__(
         self, owner, row, col, 
         deploy_cost, 
         entity_type,
         radius, 
-        speed, 
+        speed: Speed, 
         mass, 
         hitpoints,
         damage,
-        attack_radius,
+        attack_radius: AttackRadius,
         hit_speed,
         target_types,
     ):
@@ -33,7 +44,7 @@ class Troop(Entity):
             entity_type,
             hitpoints,
             damage,
-            attack_radius,
+            radius + attack_radius,
             hit_speed,
             target_types,
         )
@@ -82,13 +93,14 @@ class Troop(Entity):
 
         ### * Debug * ###
 
-        if False:
+        # if False:
+        if True:
             # Attack radius
             pygame.draw.circle(screen, "black", self.position, self.attack_radius_cells, width=1)
 
             # Waypoints
             for i in range(len(self.waypoints)-1):
-                pygame.draw.line(screen, "green", self.waypoints[i], self.waypoints[i+1], width=1)
+                pygame.draw.line(screen, "green", self.waypoints[i], self.waypoints[i+1], width=2)
 
 
     def update(self, dt, arena_cell_occupancy) -> bool:

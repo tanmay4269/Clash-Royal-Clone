@@ -3,20 +3,20 @@ from entities.troop import Troop
 from entity import EntityType
 
 
-class Giant(Troop):
+class MiniPEKKA(Troop):
     def __init__(self, owner, row, col):
         super().__init__(
             owner, row, col, 
-            deploy_cost=5,
+            deploy_cost=4,
             entity_type=EntityType.GROUND,
-            radius=1.0, 
-            speed=Troop.Speed.SLOW, 
-            mass=10.0, 
-            hitpoints=3968,
-            damage=253,
-            attack_radius=Troop.AttackRadius.MELEE_MEDIUM,
-            hit_speed=1.5,
-            target_types=EntityType.BUILDING,
+            radius=0.3, 
+            speed=Troop.Speed.FAST, 
+            mass=0.8, 
+            hitpoints=1390,
+            damage=755,
+            attack_radius=Troop.AttackRadius.MELEE_SHORT,
+            hit_speed=1.6,
+            target_types=EntityType.get_all(),
         )
         
 
@@ -29,5 +29,5 @@ class Giant(Troop):
         super().render(screen, color)
 
         font = pygame.font.SysFont(None, 12)
-        text = font.render("G", True, (0, 0, 0))  # text, antialias, color
+        text = font.render("M", True, (0, 0, 0))  # text, antialias, color
         screen.blit(text, self.position - Vector2(3, 3))

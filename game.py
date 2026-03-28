@@ -47,6 +47,10 @@ class Game:
                     from entities.troops.giant import Giant
                     self.arena._debug_active_card = Giant
                     print("Setting active card to Giant")
+                elif event.key == pygame.K_p:
+                    from entities.troops.mini_pekka import MiniPEKKA
+                    self.arena._debug_active_card = MiniPEKKA
+                    print("Setting active card to Mini PEKKA")
 
         self.arena.render(self.screen)
         if not self.arena.update(self.dt):
