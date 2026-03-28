@@ -11,7 +11,8 @@ class Troop(Entity):
 
     def __init__(
         self, owner, row, col, 
-        deploy_cost,
+        deploy_cost, 
+        entity_type,
         radius, 
         speed, 
         mass, 
@@ -19,6 +20,7 @@ class Troop(Entity):
         damage,
         attack_radius,
         hit_speed,
+        target_types,
     ):
         """
         speed: ??   # TODO: what units are these
@@ -27,11 +29,13 @@ class Troop(Entity):
 
         super().__init__(
             owner, row, col,
-            deploy_cost,
+            deploy_cost, 
+            entity_type,
             hitpoints,
             damage,
             attack_radius,
             hit_speed,
+            target_types,
         )
         
         # Physical Attributes
@@ -163,6 +167,8 @@ class Troop(Entity):
         # Target closest tower by default
         closest_obj, closest_dist = None, float('inf')
         for obj in self.owner.opponent.objects:
+            if obj.entity_type not in self.target_types:
+                continue
             dist = (self.position - obj.position).length()
 
             if dist < closest_dist:

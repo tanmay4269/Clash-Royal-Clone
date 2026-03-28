@@ -39,6 +39,14 @@ class Game:
                 elif event.key == pygame.K_2:
                     self.arena._debug_active_player = 2
                     print("Setting active player to `2`")
+                elif event.key == pygame.K_k:
+                    from entities.troops.knight import Knight
+                    self.arena._debug_active_card = Knight
+                    print("Setting active card to Knight")
+                elif event.key == pygame.K_g:
+                    from entities.troops.giant import Giant
+                    self.arena._debug_active_card = Giant
+                    print("Setting active card to Giant")
 
         self.arena.render(self.screen)
         if not self.arena.update(self.dt):

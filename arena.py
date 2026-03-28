@@ -7,6 +7,7 @@ from entities.building import Building
 from entities.troop import Troop
 
 from entities.troops.knight import Knight
+from entities.troops.giant import Giant
 
 
 class Arena:
@@ -57,6 +58,7 @@ class Arena:
 
         # * DEBUG *
         self._debug_active_player = 1  # For spawning the troop on the right side of the arena
+        self._debug_active_card = Giant
 
     
     def render(self, screen, render_cell_occupancy=True) -> None:
@@ -180,14 +182,15 @@ class Arena:
 
         # * DEBUG * 
         if self._debug_active_player == 1:
-            knight = Knight(self.player_side_1, tile_row + 1, tile_col + 1)
-            self.player_side_1.add_object(knight)
+            troop = self._debug_active_card(self.player_side_1, tile_row + 1, tile_col + 1)
+            self.player_side_1.add_object(troop)
         else:
-            knight = Knight(self.player_side_2, tile_row + 1, tile_col + 1)
-            self.player_side_2.add_object(knight)
+            troop = self._debug_active_card(self.player_side_2, tile_row + 1, tile_col + 1)
+            self.player_side_2.add_object(troop)
         
-        if self.deploy_entity(knight) is False:
-            print("Failed deploying knight")
+        if self.deploy_entity(troop) is False:
+            # print("Failed deploying troop")
+            ...
 
 
     def deploy_entity(self, deploy_me: Entity) -> bool:

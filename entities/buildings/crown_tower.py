@@ -1,5 +1,6 @@
 from utils import *
 from entities.building import Building
+from entity import EntityType
 
 
 class CrownTower(Building):
@@ -14,11 +15,13 @@ class CrownTower(Building):
         super().__init__(
             owner, row, col,
             0,  # deploy cost
+            EntityType.BUILDING,
             width, height,
             hitpoints,
             damage,
             attack_radius,
             hit_speed,
+            EntityType.get_all()
         )
 
     

@@ -1,5 +1,6 @@
 from utils import *
 from entities.troop import Troop
+from entity import EntityType
 
 
 class Knight(Troop):
@@ -7,13 +8,15 @@ class Knight(Troop):
         super().__init__(
             owner, row, col, 
             deploy_cost=3,
+            entity_type=EntityType.GROUND,
             radius=0.5, 
             speed=10.0, 
             mass=1.0, 
             hitpoints=1766,
             damage=202,
             attack_radius=0.75,
-            hit_speed=1.2
+            hit_speed=1.2,
+            target_types=EntityType.get_all(),
         )
         
         # self.sprite = pygame.image.load("assets/knight.png")
