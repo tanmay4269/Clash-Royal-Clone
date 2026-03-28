@@ -26,6 +26,7 @@ class Entity:
         attack_radius,
         hit_speed, first_hit_speed,
         target_types: Set[EntityType],
+        **kwargs
     ):
         """
         owner: of type PlayerSide
@@ -41,6 +42,7 @@ class Entity:
         target_types: set of EntityType, only these types
             of enemies will be targeted
         """
+        super().__init__(**kwargs)
 
         # Abstract Attributes
         self.owner = owner

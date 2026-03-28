@@ -1,23 +1,29 @@
 from utils import *
 from entities.buildings.crown_tower import CrownTower
+from entities.projectiles.arrow import Arrow
+from entities.projectile_shooter import ProjectileShooter
 
 
-class KingTower(CrownTower):
+class KingTower(CrownTower, ProjectileShooter):
     def __init__(
         self, owner, row: int, col: int, 
         width: int, height: int,
+        **kwargs
     ):
         """
         Level 9
         """
         super().__init__(
-            owner, row, col,
-            width, height,
+            owner=owner, row=row, col=col,
+            width=width, height=height,
             hitpoints=4008,
             damage=90,
             attack_radius=7,
-            hit_speed=1.0, first_hit_speed=0.0
+            hit_speed=1.0, first_hit_speed=0.0,
+            **kwargs
         )
+
+        self.is_activated = False
 
     
     def render(self, screen) -> None:
@@ -28,17 +34,19 @@ class KingTower(CrownTower):
 
         super().render(screen, color)
 
+        self.render_projectiles(screen)
+
 
     def update(self, dt, arena_cell_occupancy) -> bool:
-        # TODO: shooting mechanics yet to be implemented
-        
-
         if self.health < 0:
             return False
+
+        if self.is_activated:
+            self.update_projectiles(dt)
 
         return True
 
 
-    def attack_mechanics(self) -> None:
-        # TODO
-        ...
+    def get_projectile(self, direction, target_types):
+        return Arrow(self.owner, self.position.copy(), direction, self.damage, self.attack_radius_cells / 16, target_types)
+

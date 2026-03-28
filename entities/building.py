@@ -14,16 +14,18 @@ class Building(Entity):
         attack_radius,
         hit_speed, first_hit_speed,
         target_types,
+        **kwargs
     ):
         super().__init__(
-            owner, row, col,
-            deploy_cost, deploy_delay,
-            entity_type,
-            hitpoints,
-            damage,
-            attack_radius,
-            hit_speed, first_hit_speed,
-            target_types,
+            owner=owner, row=row, col=col,
+            deploy_cost=deploy_cost, deploy_delay=deploy_delay,
+            entity_type=entity_type,
+            hitpoints=hitpoints,
+            damage=damage,
+            attack_radius=attack_radius,
+            hit_speed=hit_speed, first_hit_speed=first_hit_speed,
+            target_types=target_types,
+            **kwargs
         )
 
         self.width = width
