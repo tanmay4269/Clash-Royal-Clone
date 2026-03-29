@@ -11,12 +11,26 @@ class PlayerSide:
         self.princess_tower_1 = None  # The one closer to (0, 0) 
         self.princess_tower_2 = None
 
-        # TODO: GameBoard should manage this instead
-        self.elixirs = 5  # init
+        self.elixirs = 5.0  # init
         self.max_elixirs = 10
-        self.elixirs_per_sec = 1
+        self.elixirs_per_sec = 1.0
+        self._elixir_timer = 0.0
 
         self.objects = set()  # Add towers once initialised
+
+
+    def update(self, dt):
+        self._elixir_timer += dt
+
+        if self._elixir_timer < self.elixirs_per_sec:
+            return
+
+        self._elixir_timer = 0.0
+        self.elixirs = min(self.max_elixirs, self.elixirs + 1)
+
+    
+    def spend_elixirs(self, amount):
+        self.elixirs -= amount
 
     
     def get_objects(self):

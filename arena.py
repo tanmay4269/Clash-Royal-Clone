@@ -59,6 +59,10 @@ class Arena:
             self.deploy_entity(obj)
 
 
+        self.elapsed_time = 0
+        self.game_duration = 90  # sec
+        self._font = None
+
         # * DEBUG *
         self._debug_active_player = 1  # For spawning the troop on the right side of the arena
         self._debug_active_card = MiniPEKKA
@@ -112,12 +116,32 @@ class Arena:
         surface.set_alpha(127)
         surface.fill((128, 128, 128))
         screen.blit(surface, (tile_x * self.tile_size, tile_y * self.tile_size))
+
+        # HUD: elixir (bottom left) and timer (bottom right)
+        if self._font is None:
+            self._font = pygame.font.SysFont(None, 14)
+
+        screen_w = self.width * self.tile_size
+        screen_h = self.height * self.tile_size
+
+        elixir_text_1 = self._font.render(f"E: {self.player_side_1.elixirs:.0f}", True, (220, 220, 220))
+        screen.blit(elixir_text_1, (4, 4))
+
+        elixir_text_2 = self._font.render(f"E: {self.player_side_2.elixirs:.0f}", True, (220, 220, 220))
+        screen.blit(elixir_text_2, (4, screen_h - elixir_text_2.get_height() - 4))
+
+        timer_text = self._font.render(f"{int(self.elapsed_time)}s", True, (220, 220, 220))
+        screen.blit(timer_text, (screen_w - timer_text.get_width() - 4, 4))
  
 
     def update(self, dt) -> bool:
         """
         retur: False means game over
         """
+
+        self.elapsed_time += dt
+        if self.elapsed_time >= self.game_duration:
+            return False
 
         ### Collision Management ###
 
@@ -192,6 +216,10 @@ class Arena:
             self.objects.remove(obj)
             del obj
 
+
+        ### Elixir Update ###
+        self.player_side_1.update(dt)
+        self.player_side_2.update(dt)
         
         return True
 
@@ -234,8 +262,8 @@ class Arena:
         self.deploy_buffer.add(deploy_me)
 
         # 4. Subtract player's elixirs and return True
-        # * DEBUG *
-        # deploy_me.owner.elixirs -= deploy_me.deploy_cost
+        deploy_me.owner.spend_elixirs(deploy_me.deploy_cost)
+
         return True
 
 

@@ -31,7 +31,7 @@ class Entity:
         """
         owner: of type PlayerSide
         row, col: in tiles
-        deploy_cost: in elexirs
+        deploy_cost: in elixirs
         deploy_delay: in sec. Time between placing an entity and it actually starting 
             to do its thing. Nothing interacts with it in this phase.
         entity_type: of type EntityType
