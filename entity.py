@@ -15,6 +15,9 @@ class EntityType:
 
 
 class Entity:
+    # TODO: make a child class called "Card" that defines abstraction for buildings and troops 
+    # while projectile can be merged as a child of this class to stay DRY
+
     CELL_OCCUPANCY_LAYERS = 3  # Excluding the trivial 0th layer
 
     def __init__(

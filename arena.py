@@ -134,14 +134,16 @@ class Arena:
         screen.blit(timer_text, (screen_w - timer_text.get_width() - 4, 4))
  
 
-    def update(self, dt) -> bool:
+    def update(self, dt) -> Tuple[bool, bool]:
         """
-        retur: False means game over
+        return: 
+            terminated: if someone won
+            truncated: if time limit exceeded and the game hasnt terminated
         """
 
         self.elapsed_time += dt
         if self.elapsed_time >= self.game_duration:
-            return False
+            return False, True
 
         ### Collision Management ###
 
@@ -208,10 +210,10 @@ class Arena:
             
             if obj == self.player_side_1.king_tower:
                 print("Player 2 won!")
-                return False
+                return True, False
             elif obj == self.player_side_2.king_tower:
                 print("Player 1 won!")
-                return False
+                return True, False
 
             self.objects.remove(obj)
             del obj
@@ -221,7 +223,7 @@ class Arena:
         self.player_side_1.update(dt)
         self.player_side_2.update(dt)
         
-        return True
+        return False, False
 
 
     def on_click(self) -> None:

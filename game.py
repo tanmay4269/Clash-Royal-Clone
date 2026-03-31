@@ -53,7 +53,8 @@ class Game:
                     print("Setting active card to Mini PEKKA")
 
         self.arena.render(self.screen)
-        if not self.arena.update(self.dt):
+        terminated, truncated = self.arena.update(self.dt)
+        if terminated or truncated:
             self.running = False
             return
 
