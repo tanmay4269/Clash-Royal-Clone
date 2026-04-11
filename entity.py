@@ -2,9 +2,9 @@ from utils import *
 
 
 class EntityType:
-    GROUND      = 1
-    AIR         = 2
-    BUILDING    = 3
+    GROUND      = 0
+    AIR         = 1
+    BUILDING    = 2
 
     def get_all():
         return set({
@@ -12,6 +12,9 @@ class EntityType:
             EntityType.AIR,
             EntityType.BUILDING,
         })
+
+    def num_types():
+        return 3
 
 
 class Entity:

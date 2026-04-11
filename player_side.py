@@ -12,7 +12,7 @@ class PlayerSide:
         self.princess_tower_2 = None
 
         self.elixirs = 5.0  # init
-        self.max_elixirs = 10
+        self.max_elixirs = 10  # TODO: move this up to arena class, pass as arg
         self.elixirs_per_sec = 1.0
         self._elixir_timer = 0.0
 
