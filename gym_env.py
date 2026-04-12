@@ -108,7 +108,8 @@ class ClashRoyaleEnv(gym.Env):
         self.screen = None
         self.clock = None
 
-        self.FIXED_DT = 1/4  # 4 fps simulator
+        # self.FIXED_DT = 1/4  # 4 fps simulator
+        self.FIXED_DT = 1/4
 
         self._cur_obs = None
 
@@ -228,7 +229,7 @@ class ClashRoyaleEnv(gym.Env):
             elif action[f"player_{idx}_card_idx"] == 2:
                 card = MiniPEKKA
 
-            self.arena.deploy_entity(card(owner, x, y))
+            self.arena.deploy_entity(card(owner, y, x))
 
         prev_obs = self._cur_obs
         terminated, truncated = self.arena.update(self.FIXED_DT)
@@ -323,10 +324,30 @@ if __name__ == "__main__":
     state, _ = env.reset()
     done = False
 
+    spawn_cooldown = 1.0
+
     try:
         while not done:
-            action = env.action_space.sample()
+            if spawn_cooldown > 0.1:
+                spawn_cooldown = 0
+                action = {
+                    "player_1_skip": 0,
+                    "player_2_skip": 0,
+
+                    "player_1_card_idx": 0,
+                    "player_2_card_idx": 0,
+
+                    "player_1_card_position": np.array([9, 10]),
+                    "player_2_card_position": np.array([9, 12]),
+                }
+            else:
+                action = env.action_space.sample()
+                action["player_1_skip"] = 1
+                action["player_2_skip"] = 1
+
             next_state, reward, termination, truncated, _ = env.step(action)
+
+            spawn_cooldown = next_state["game_completion_fraction"]
 
             print("-----")
             print(next_state["game_completion_fraction"])
