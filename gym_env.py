@@ -1,4 +1,4 @@
-import numpy as np
+from utils import *
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -123,7 +123,7 @@ class ClashRoyaleEnv(gym.Env):
         obs["player_2_elixirs"] = self.arena.player_side_2.elixirs
 
         ### Cards ###
-        obs["player_1_cards"], obs["player_2_cards"] = = [], []
+        obs["player_1_cards"], obs["player_2_cards"] = [], []
         for obj in self.arena.objects:
             owner = obs["player_1_cards"] if obj.owner == self.arena.player_side_1 else obs["player_2_cards"]
             owner.append({
@@ -140,7 +140,7 @@ class ClashRoyaleEnv(gym.Env):
                     dtype=np.int8
                 ),
 
-                "position": np.array(obj.position.x, obj.position.y),
+                "position": np.array([obj.position.x, obj.position.y]),
                 
                 "health": obj.health,
                 "hitpoints": obj.hitpoints,
@@ -200,13 +200,13 @@ class ClashRoyaleEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
-        observation = self._get_obs()
+        self._cur_obs = self._get_obs()
         info = self._get_info()
 
         if self.render_mode == "human":
             self._render_frame()
 
-        return observation, info
+        return self._cur_obs, info
 
 
     def step(self, action):
@@ -233,6 +233,8 @@ class ClashRoyaleEnv(gym.Env):
         prev_obs = self._cur_obs
         terminated, truncated = self.arena.update(self.FIXED_DT)
         self._cur_obs = self._get_obs()
+        
+        self.arena.render(self.screen)
 
         reward = self._get_reward(prev_obs)
         info = self._get_info()
@@ -244,6 +246,8 @@ class ClashRoyaleEnv(gym.Env):
 
 
     def _get_reward(self, prev_obs):
+        if prev_obs is None:
+            return 0.0, 0.0
         player_1_reward, player_2_reward = 0, 0
 
         for idx in [1, 2]:
@@ -264,12 +268,24 @@ class ClashRoyaleEnv(gym.Env):
 
 
     def _render_frame(self):
-        if self.screen is None and self.render_mode == "human":
+        # if self.screen is None and self.render_mode == "human":
+        #     pygame.init()
+        #     pygame.display.init()
+        #     self.screen = pygame.display.set_mode(
+        #         (self.window_size, self.window_size)
+        #     )
+
+        canvas_w = self.arena.width * self.arena.tile_size
+        canvas_h = self.arena.height * self.arena.tile_size
+
+        if self.screen is None:
             pygame.init()
-            pygame.display.init()
-            self.screen = pygame.display.set_mode(
-                (self.window_size, self.window_size)
-            )
+            if self.render_mode == "human":
+                pygame.display.init()
+                self.screen = pygame.display.set_mode((canvas_w, canvas_h))
+            else:  
+                # rgb_array: use an offscreen surface, no display needed
+                self.screen = pygame.Surface((canvas_w, canvas_h))
 
         if self.clock is None and self.render_mode == "human":
             self.clock = pygame.time.Clock()
@@ -281,36 +297,47 @@ class ClashRoyaleEnv(gym.Env):
         else:  # rgb_array
             rgb_array = pygame.surfarray.array3d(self.screen)
             rgb_array = rgb_array.transpose(1, 0, 2)  # pygame is (w,h,c), numpy expects (h,w,c)
+            return rgb_array
 
 
     def close(self):
-        if self.window is not None:
-            pygame.display.quit()
+        if self.screen is not None:
+            if self.render_mode == "human":
+                pygame.display.quit()
             pygame.quit()
+            self.screen = None
 
 
 if __name__ == "__main__":
     # quick test
-    from rich import print
 
-    env = ClashRoyaleEnv()  # Works but the latter has some useful checks
-    # env = gym.make("ClashRoyaleEnv-v0")
+    # env = ClashRoyaleEnv()  # Works but the latter has some useful checks
+    env = gym.make("ClashRoyaleEnv-v0", render_mode="rgb_array")
+    env = gym.wrappers.RecordVideo(
+        env,
+        video_folder="./videos",
+        name_prefix=f"debug",
+        episode_trigger=lambda _: True,
+    )
+    
     state, _ = env.reset()
-
-    # print("state", state)
-
     done = False
 
-    while not done:
-        action = env.action_space.sample()
-        next_state, reward, termination, truncated, _ = env.step(action)
+    try:
+        while not done:
+            action = env.action_space.sample()
+            next_state, reward, termination, truncated, _ = env.step(action)
 
-        # print("-----")
-        # print("action", action)
-        # print("next_state", next_state)
-        # print("reward", reward)
-        # print("termination", termination)
-        # print("truncated", truncated)
-        print(next_state["game_completion_fraction"])
+            print("-----")
+            print(next_state["game_completion_fraction"])
+            print("action", action)
+            # print("next_state", next_state)
+            # print("reward", reward)
+            # print("termination", termination)
+            # print("truncated", truncated)
 
-        done = termination or truncated
+            done = termination or truncated
+    except Exception as e:
+        print(e)
+
+    env.close()

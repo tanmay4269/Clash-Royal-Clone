@@ -1,4 +1,6 @@
 from typing import Tuple, List, Set
+from rich import print
+
 import numpy as np
 
 import pygame
