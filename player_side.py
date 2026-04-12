@@ -17,6 +17,7 @@ class PlayerSide:
         self._elixir_timer = 0.0
 
         self.objects = set()  # Add towers once initialised
+            # TODO: make a dict instead, but need to change getters and setters
 
 
     def update(self, dt):
@@ -60,9 +61,9 @@ class PlayerSide1(PlayerSide):
         self.princess_tower_1 = PrincessTower(self, 6.5, 3.5, 2, 2)
         self.princess_tower_2 = PrincessTower(self, 6.5, 18 - 3.5, 2, 2)
 
-        self.objects = {
+        self.objects = set({
             self.king_tower, self.princess_tower_1, self.princess_tower_2
-        }
+        })
 
 
 class PlayerSide2(PlayerSide):
@@ -74,6 +75,6 @@ class PlayerSide2(PlayerSide):
         self.princess_tower_1 = PrincessTower(self, 32 - 6.5, 3.5, 2, 2)
         self.princess_tower_2 = PrincessTower(self, 32 - 6.5, 18 - 3.5, 2, 2)
         
-        self.objects = {
+        self.objects = set({
             self.king_tower, self.princess_tower_1, self.princess_tower_2
-        }
+        })

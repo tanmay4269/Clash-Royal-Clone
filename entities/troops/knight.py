@@ -2,7 +2,6 @@ from utils import *
 from entities.troop import Troop
 
 
-
 class Knight(Troop):
     def __init__(self, owner, row, col):
         super().__init__(

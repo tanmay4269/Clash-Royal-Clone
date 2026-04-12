@@ -5,7 +5,9 @@ from gymnasium import spaces
 from gymnasium.envs.registration import register
 
 from arena import Arena
-from entity import EntityType
+from entity import EntityType, Entity
+
+from entities.troops import *
 
 
 register(
@@ -22,22 +24,20 @@ class ClashRoyaleEnv(gym.Env):
         ### Observation Space ###
         INT_MAX = 1_000_000
         FLOAT_MAX = 1_000_000.0
-        
-        # x, y
-        # TODO: reconsider if this should rather be discrete
-        position_space = spaces.Box(  
-            low=np.array([0.0, 0.0]),
-            high=np.array([
-                self.arena.width * self.arena.tile_size,
-                self.arena.height * self.arena.tile_size
-            ])
-        )
 
         def get_entity_space(is_card=True):
             # either its a card or its a crown tower
 
             ret = {
-                "position": position_space,
+                # x, y
+                # TODO: reconsider if this should rather be discrete
+                "position": spaces.Box(  
+                    low=np.array([0.0, 0.0]),
+                    high=np.array([
+                        self.arena.width * self.arena.tile_size,
+                        self.arena.height * self.arena.tile_size
+                    ])
+                ),
                 
                 "health": spaces.Discrete(INT_MAX),
                 "hitpoints": spaces.Discrete(INT_MAX),
@@ -82,6 +82,14 @@ class ClashRoyaleEnv(gym.Env):
 
         ### Action Space ###
         NUM_CARDS_IN_DECK = 3  # TODO: ofc find a better way
+        position_space = spaces.Box(  
+            low=np.array([0.0, 0.0]),
+            high=np.array([
+                self.arena.width,
+                self.arena.height
+            ]),
+            dtype=int
+        )
 
         self.action_space = spaces.Dict({
             "player_1_skip": spaces.Discrete(2), # bool
@@ -93,6 +101,7 @@ class ClashRoyaleEnv(gym.Env):
             "player_2_card_position": position_space,
         })
 
+        ### Helpers ###
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
 
@@ -101,10 +110,82 @@ class ClashRoyaleEnv(gym.Env):
 
         self.FIXED_DT = 1/4  # 4 fps simulator
 
+        self._cur_obs = None
+
+
     def _get_obs(self):
-        obs = self.observation_space.sample()
-        # TODO overwrite properly
+        obs = {}
+
+        ### Basics ###
+        obs["game_completion_fraction"] = self.arena.elapsed_time / self.arena.game_duration
+
+        obs["player_1_elixirs"] = self.arena.player_side_1.elixirs
+        obs["player_2_elixirs"] = self.arena.player_side_2.elixirs
+
+        ### Cards ###
+        obs["player_1_cards"], obs["player_2_cards"] = = [], []
+        for obj in self.arena.objects:
+            owner = obs["player_1_cards"] if obj.owner == self.arena.player_side_1 else obs["player_2_cards"]
+            owner.append({
+                "deploy_cost": obj.deploy_cost,
+                "deploy_delay": obj.deploy_delay,
+
+                "entity_type": obj.entity_type,
+                "target_type": np.array(
+                    [
+                        EntityType.GROUND   in obj.target_types,
+                        EntityType.AIR      in obj.target_types,
+                        EntityType.BUILDING in obj.target_types,
+                    ], 
+                    dtype=np.int8
+                ),
+
+                "position": np.array(obj.position.x, obj.position.y),
+                
+                "health": obj.health,
+                "hitpoints": obj.hitpoints,
+                
+                "damage": obj.damage,
+                "attack_radius_cells": obj.attack_radius_cells,
+
+                "hit_speed": obj.hit_speed,
+                "first_hit_speed": obj.first_hit_speed,
+            })
+
+
+        ### Crown Towers ###
+        obs["player_1_crown_towers"], obs["player_2_crown_towers"] = {}, {}
+
+        # TODO: this is too hidious, should have a getter in the entity class
+        for side_name in ["player_1", "player_2"]:
+            side = self.arena.player_side_1 if side_name == "player_1" else \
+                self.arena.player_side_2
+
+            for tower_name in ["king_tower", "princess_tower_1", "princess_tower_2"]:
+                tower = None
+                if tower_name == "king_tower":
+                    tower = side.king_tower
+                elif tower_name == "princess_tower_1":
+                    tower = side.princess_tower_1
+                else:
+                    tower = side.princess_tower_2
+
+                obs[f"{side_name}_crown_towers"][tower_name] = {
+                    "position": np.array([tower.position.x, tower.position.y]),
+
+                    "health": tower.health,
+                    "hitpoints": tower.hitpoints,
+
+                    "damage": tower.damage,
+                    "attack_radius_cells": tower.attack_radius_cells,
+
+                    "hit_speed": tower.hit_speed,
+                    "first_hit_speed": tower.first_hit_speed
+                }
+
+
         return obs
+
 
     def _get_info(self):
         """
@@ -114,6 +195,7 @@ class ClashRoyaleEnv(gym.Env):
         """
         # TODO
         return {}
+
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -126,26 +208,60 @@ class ClashRoyaleEnv(gym.Env):
 
         return observation, info
 
-    def step(self, action):
-        # TODO: actually take action, something like arena.on_click
 
+    def step(self, action):
+        for idx in [1, 2]:
+            if action[f"player_{idx}_skip"] == 1:
+                continue
+
+            owner = self.arena.player_side_2 if idx == 1 \
+                else self.arena.player_side_1
+
+            x, y = action[f"player_{idx}_card_position"]
+            
+            # TODO: use entity registers instead
+            card = None
+            if action[f"player_{idx}_card_idx"] == 0:
+                card = Knight
+            elif action[f"player_{idx}_card_idx"] == 1:
+                card = Giant
+            elif action[f"player_{idx}_card_idx"] == 2:
+                card = MiniPEKKA
+
+            self.arena.deploy_entity(card(owner, x, y))
+
+        prev_obs = self._cur_obs
         terminated, truncated = self.arena.update(self.FIXED_DT)
-        reward = self._get_reward()
-        observation = self._get_obs()
+        self._cur_obs = self._get_obs()
+
+        reward = self._get_reward(prev_obs)
         info = self._get_info()
 
         if self.render_mode == "human":
             self._render_frame()
 
-        return observation, reward, terminated, truncated, info
+        return self._cur_obs, reward, terminated, truncated, info
 
-    def _get_reward(self):
-        # TODO: sum of damages to the opponents towers - our towers
-        return 0.0
+
+    def _get_reward(self, prev_obs):
+        player_1_reward, player_2_reward = 0, 0
+
+        for idx in [1, 2]:
+            cur_dict  = self._cur_obs[f"player_{idx}_crown_towers"]
+            prev_dict = prev_obs[f"player_{idx}_crown_towers"] 
+
+            player_idx_reward = player_1_reward if idx == 1 else  player_2_reward
+
+            for tower_str in cur_dict.keys():
+                player_idx_reward += cur_dict[tower_str]["health"] - prev_dict[tower_str]["health"]
+
+        return player_1_reward, player_2_reward
+
 
     def render(self):
         if self.render_mode == "rgb_array":
             return self._render_frame()
+
 
     def _render_frame(self):
         if self.screen is None and self.render_mode == "human":
@@ -165,6 +281,7 @@ class ClashRoyaleEnv(gym.Env):
         else:  # rgb_array
             rgb_array = pygame.surfarray.array3d(self.screen)
             rgb_array = rgb_array.transpose(1, 0, 2)  # pygame is (w,h,c), numpy expects (h,w,c)
+
 
     def close(self):
         if self.window is not None:
