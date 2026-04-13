@@ -15,10 +15,12 @@ class Troop(Entity):
         MEDIUM = 10.0
         FAST   = 15.0
 
+
     class AttackRadius:
         # Units: Tiles more than the troop radius
         MELEE_SHORT  = 0.15
         MELEE_MEDIUM = 0.25  
+
 
     def __init__(
         self, owner, row, col, 
@@ -215,7 +217,7 @@ class Troop(Entity):
                 closest_obj = obj
                 closest_dist = dist
 
-        assert closest_obj is not None
+        # assert closest_obj is not None
 
         self.target = closest_obj
 

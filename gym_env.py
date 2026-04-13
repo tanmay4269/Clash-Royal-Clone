@@ -108,8 +108,7 @@ class ClashRoyaleEnv(gym.Env):
         self.screen = None
         self.clock = None
 
-        # self.FIXED_DT = 1/4  # 4 fps simulator
-        self.FIXED_DT = 1/4
+        self.FIXED_DT = 1/4  # 4 fps simulator
 
         self._cur_obs = None
 
@@ -194,7 +193,7 @@ class ClashRoyaleEnv(gym.Env):
         (e.g., individual reward terms). In that case, we would have to update the dictionary that 
         is returned by _get_info in step.
         """
-        # TODO
+        # TODO (maybe)
         return {}
 
 
@@ -229,19 +228,14 @@ class ClashRoyaleEnv(gym.Env):
             elif action[f"player_{idx}_card_idx"] == 2:
                 card = MiniPEKKA
 
-
             card_instance = card(owner, y, x)
             owner.add_object(card_instance)
             self.arena.deploy_entity(card_instance)
 
-        prev_obs = self._cur_obs
+        prev_obs = self._cur_obs  # Saving for reward calculation
         
-        self.arena.render(self.screen)
-        # terminated, truncated = self.arena.update(self.FIXED_DT)
-
+        # For stable physics updates
         terminated, truncated = False, False
-        
-        # for stable physics updates
         for _ in range(10):
             _terminated, _truncated = self.arena.update(self.FIXED_DT / 10)
             terminated, truncated = terminated or _terminated, truncated or _truncated
@@ -267,7 +261,7 @@ class ClashRoyaleEnv(gym.Env):
         if prev_obs is None:
             return 0.0, 0.0
 
-        player_1_reward, player_2_reward = 0, 0
+        player_1_reward, player_2_reward = 0.0, 0.0
 
         for idx in [1, 2]:
             cur_dict  = self._cur_obs[f"player_{idx}_crown_towers"]
@@ -294,14 +288,7 @@ class ClashRoyaleEnv(gym.Env):
 
 
     def _render_frame(self):
-        # if self.screen is None and self.render_mode == "human":
-        #     pygame.init()
-        #     pygame.display.init()
-        #     self.screen = pygame.display.set_mode(
-        #         (self.window_size, self.window_size)
-        #     )
-
-        screen_w = self.arena.width * self.arena.tile_size
+        screen_w = self.arena.width  * self.arena.tile_size
         screen_h = self.arena.height * self.arena.tile_size
 
         if self.screen is None:
@@ -315,11 +302,13 @@ class ClashRoyaleEnv(gym.Env):
 
         if self.clock is None and self.render_mode == "human":
             self.clock = pygame.time.Clock()
+        
+        self.arena.render(self.screen)
 
         if self.render_mode == "human":
             self.arena.render(self.screen)
             pygame.display.flip()
-            self.clock.tick(self.metadata["render_fps"])
+            self.clock.tick(self.metadata["render_fps"])  # TODO: do i even need this!?
         else:  # rgb_array
             rgb_array = pygame.surfarray.array3d(self.screen)
             rgb_array = rgb_array.transpose(1, 0, 2)  # pygame is (w,h,c), numpy expects (h,w,c)

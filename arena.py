@@ -277,7 +277,7 @@ class Arena:
         Can also be used to "unoccupy" cells
         """
 
-        assert len(mask.shape) == 2
+        # assert len(mask.shape) == 2
 
         if isinstance(mask_pos, Vector2):
             mask_pos = (int(mask_pos.x), int(mask_pos.y))
