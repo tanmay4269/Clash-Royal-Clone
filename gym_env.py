@@ -258,18 +258,32 @@ class ClashRoyaleEnv(gym.Env):
 
 
     def _get_reward(self, prev_obs):
+        """
+        TODOs:
+        - additional reward when the princess towers are distroyed 
+        - additional reward when the game is one by someone and lost by the other
+        """
+
         if prev_obs is None:
             return 0.0, 0.0
+
         player_1_reward, player_2_reward = 0, 0
 
         for idx in [1, 2]:
             cur_dict  = self._cur_obs[f"player_{idx}_crown_towers"]
             prev_dict = prev_obs[f"player_{idx}_crown_towers"] 
 
-            player_idx_reward = player_1_reward if idx == 1 else  player_2_reward
+            player_idx_reward = player_1_reward if idx == 1 else player_2_reward
 
             for tower_str in cur_dict.keys():
-                player_idx_reward += cur_dict[tower_str]["health"] - prev_dict[tower_str]["health"]
+                delta = cur_dict[tower_str]["health"] - prev_dict[tower_str]["health"]
+
+                if idx == 1:
+                    player_1_reward += delta
+                    player_2_reward -= delta
+                else:
+                    player_1_reward -= delta
+                    player_2_reward += delta
 
         return player_1_reward, player_2_reward
 
@@ -373,14 +387,14 @@ if __name__ == "__main__":
 
             next_state, reward, termination, truncated, _ = env.step(action)
 
-            player_1_spawn_cooldown += 1/10
-            player_2_spawn_cooldown += 1/10
+            player_1_spawn_cooldown += 1/100
+            # player_2_spawn_cooldown += 1/100
 
             # print("-----")
-            print(next_state["game_completion_fraction"])
+            # print(next_state["game_completion_fraction"])
             # print("action", action)
             # print("next_state", next_state)
-            # print("reward", reward)
+            print("reward", reward)
             # print("termination", termination)
             # print("truncated", truncated)
 
