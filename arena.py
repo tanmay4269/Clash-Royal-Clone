@@ -65,7 +65,7 @@ class Arena:
 
         # * DEBUG *
         self._debug_active_player = 1  # For spawning the troop on the right side of the arena
-        self._debug_active_card = MiniPEKKA
+        self._debug_active_card = Knight
 
     
     def render(self, screen, render_cell_occupancy=True) -> None:

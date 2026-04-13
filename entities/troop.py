@@ -106,8 +106,8 @@ class Troop(Entity):
 
         ### * Debug * ###
 
-        if False:
-        # if True:
+        # if False:
+        if True:
             # Attack radius
             pygame.draw.circle(screen, "black", self.position, self.attack_radius_cells, width=1)
 
@@ -124,6 +124,7 @@ class Troop(Entity):
 
         if self.health < 0:
             return False
+
 
         ### Navigation ###
         self.velocity = Vector2()  # Reset velocity each tick; TODO Think this through
@@ -153,10 +154,14 @@ class Troop(Entity):
             target_size = self.target.size
 
         # Check target proximity
+        found_path = False
         if (self.position - self.target.position).length() > self.attack_radius_cells + target_size:
             found_path = self.find_path(arena_cell_occupancy)
-            assert found_path, "Couldn't find a path"
 
+            if not found_path:
+                print("[WARN: Troop::update]: Couldn't find a path")
+
+        if found_path:
             if len(self.waypoints) == 0:
                 self.target = None
                 return True

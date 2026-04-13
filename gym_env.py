@@ -229,13 +229,24 @@ class ClashRoyaleEnv(gym.Env):
             elif action[f"player_{idx}_card_idx"] == 2:
                 card = MiniPEKKA
 
-            self.arena.deploy_entity(card(owner, y, x))
+
+            card_instance = card(owner, y, x)
+            owner.add_object(card_instance)
+            self.arena.deploy_entity(card_instance)
 
         prev_obs = self._cur_obs
-        terminated, truncated = self.arena.update(self.FIXED_DT)
-        self._cur_obs = self._get_obs()
         
         self.arena.render(self.screen)
+        # terminated, truncated = self.arena.update(self.FIXED_DT)
+
+        terminated, truncated = False, False
+        
+        # for stable physics updates
+        for _ in range(10):
+            _terminated, _truncated = self.arena.update(self.FIXED_DT / 10)
+            terminated, truncated = terminated or _terminated, truncated or _truncated
+        
+        self._cur_obs = self._get_obs()
 
         reward = self._get_reward(prev_obs)
         info = self._get_info()
@@ -276,17 +287,17 @@ class ClashRoyaleEnv(gym.Env):
         #         (self.window_size, self.window_size)
         #     )
 
-        canvas_w = self.arena.width * self.arena.tile_size
-        canvas_h = self.arena.height * self.arena.tile_size
+        screen_w = self.arena.width * self.arena.tile_size
+        screen_h = self.arena.height * self.arena.tile_size
 
         if self.screen is None:
             pygame.init()
             if self.render_mode == "human":
                 pygame.display.init()
-                self.screen = pygame.display.set_mode((canvas_w, canvas_h))
+                self.screen = pygame.display.set_mode((screen_w, screen_h))
             else:  
                 # rgb_array: use an offscreen surface, no display needed
-                self.screen = pygame.Surface((canvas_w, canvas_h))
+                self.screen = pygame.Surface((screen_w, screen_h))
 
         if self.clock is None and self.render_mode == "human":
             self.clock = pygame.time.Clock()
@@ -324,22 +335,37 @@ if __name__ == "__main__":
     state, _ = env.reset()
     done = False
 
-    spawn_cooldown = 1.0
+    player_1_spawn_cooldown = 0.0
+    player_2_spawn_cooldown = 0.0
+
+    player_1_spawn = {
+        "player_1_skip": 0,
+        "player_1_card_idx": 0,
+        "player_1_card_position": np.array([9, 32-10]),
+
+        "player_2_skip": 1,
+        "player_2_card_idx": 0,
+        "player_2_card_position": np.array([9, 10]),
+    }
+
+    player_2_spawn = {
+        "player_1_skip": 1,
+        "player_1_card_idx": 0,
+        "player_1_card_position": np.array([9, 32-10]),
+
+        "player_2_skip": 0,
+        "player_2_card_idx": 0,
+        "player_2_card_position": np.array([9, 10]),
+    }
 
     try:
         while not done:
-            if spawn_cooldown > 0.1:
-                spawn_cooldown = 0
-                action = {
-                    "player_1_skip": 0,
-                    "player_2_skip": 0,
-
-                    "player_1_card_idx": 0,
-                    "player_2_card_idx": 0,
-
-                    "player_1_card_position": np.array([9, 10]),
-                    "player_2_card_position": np.array([9, 12]),
-                }
+            if player_1_spawn_cooldown > 0.25:
+                player_1_spawn_cooldown = 0.0
+                action = player_1_spawn
+            elif player_2_spawn_cooldown > 0.2:
+                player_2_spawn_cooldown = 0.0
+                action = player_2_spawn
             else:
                 action = env.action_space.sample()
                 action["player_1_skip"] = 1
@@ -347,11 +373,12 @@ if __name__ == "__main__":
 
             next_state, reward, termination, truncated, _ = env.step(action)
 
-            spawn_cooldown = next_state["game_completion_fraction"]
+            player_1_spawn_cooldown += 1/10
+            player_2_spawn_cooldown += 1/10
 
-            print("-----")
+            # print("-----")
             print(next_state["game_completion_fraction"])
-            print("action", action)
+            # print("action", action)
             # print("next_state", next_state)
             # print("reward", reward)
             # print("termination", termination)
