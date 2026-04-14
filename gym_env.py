@@ -1,4 +1,5 @@
 from utils import *
+from ppo_self_play.utils import CRFlattenNormWrapper
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -6,6 +7,7 @@ from gymnasium.envs.registration import register
 
 from arena import Arena
 from entity import EntityType, Entity
+from entities.buildings.crown_tower import CrownTower
 
 from entities.troops import *
 
@@ -25,10 +27,15 @@ class ClashRoyaleEnv(gym.Env):
         INT_MAX = 1_000_000
         FLOAT_MAX = 1_000_000.0
 
-        def get_entity_space(is_card=True):
-            # either its a card or its a crown tower
+        def get_entity_space():
+            return spaces.Dict({
+                "deploy_cost": spaces.Discrete(self.arena.player_side_1.max_elixirs + 1),
+                "deploy_delay": spaces.Box(0.0, 10.0),
+                
+                "entity_type": spaces.Discrete(EntityType.num_types()), 
 
-            ret = {
+                "target_types": spaces.MultiBinary(EntityType.num_types()), 
+
                 # x, y
                 # TODO: reconsider if this should rather be discrete
                 "position": spaces.Box(  
@@ -39,43 +46,32 @@ class ClashRoyaleEnv(gym.Env):
                     ])
                 ),
                 
-                "health": spaces.Discrete(INT_MAX),
-                "hitpoints": spaces.Discrete(INT_MAX),
+                # "health": spaces.Box(0.0, FLOAT_MAX),
+                "health": spaces.Box(0.0, EntityRegistry.aggregate("health")["max"]),
+                "hitpoints": spaces.Box(0.0, EntityRegistry.aggregate("hitpoints")["max"]),
 
-                "damage": spaces.Discrete(INT_MAX),
-                "attack_radius_cells": spaces.Discrete(INT_MAX),
+                "damage": spaces.Box(0.0, EntityRegistry.aggregate("damage")["max"]),
+                "attack_radius_cells": spaces.Box(0.0, EntityRegistry.aggregate("attack_radius_cells")["max"]),
 
-                "hit_speed": spaces.Box(0.0, FLOAT_MAX),
-                "first_hit_speed": spaces.Box(0.0, FLOAT_MAX),
+                "hit_speed": spaces.Box(0.0, EntityRegistry.aggregate("hit_speed")["max"]),
+                "first_hit_speed": spaces.Box(0.0, EntityRegistry.aggregate("first_hit_speed")["max"]),
                 
                 # Maybe add what stage of its hit cycle is it if the model can't seem to figure this out
-            }
-
-            if is_card:
-                ret.update({
-                    "deploy_cost": spaces.Discrete(self.arena.player_side_1.max_elixirs),
-                    "deploy_delay": spaces.Box(0.0, FLOAT_MAX),
-                    
-                    "entity_type": spaces.Discrete(EntityType.num_types()), 
-
-                    "target_types": spaces.MultiBinary(EntityType.num_types())
-                })
-
-            return spaces.Dict(ret)
+            })
 
         crown_towers_space = spaces.Dict({
-            "king_tower": get_entity_space(is_card=False),
-            "princess_tower_1": get_entity_space(is_card=False),
-            "princess_tower_2": get_entity_space(is_card=False),
+            "king_tower": get_entity_space(),
+            "princess_tower_1": get_entity_space(),
+            "princess_tower_2": get_entity_space(),
         })
 
         self.observation_space = spaces.Dict({
             "game_completion_fraction": spaces.Box(0.0, 1.0),
-            "player_1_elixirs": spaces.Discrete(self.arena.player_side_1.max_elixirs),
+            "player_1_elixirs": spaces.Discrete(self.arena.player_side_1.max_elixirs + 1),
             "player_1_cards": spaces.Sequence(get_entity_space()),
             "player_1_crown_towers": crown_towers_space,
 
-            "player_2_elixirs": spaces.Discrete(self.arena.player_side_2.max_elixirs),
+            "player_2_elixirs": spaces.Discrete(self.arena.player_side_2.max_elixirs + 1),
             "player_2_cards": spaces.Sequence(get_entity_space()),
             "player_2_crown_towers": crown_towers_space,
         })
@@ -119,26 +115,26 @@ class ClashRoyaleEnv(gym.Env):
         ### Basics ###
         obs["game_completion_fraction"] = self.arena.elapsed_time / self.arena.game_duration
 
-        obs["player_1_elixirs"] = self.arena.player_side_1.elixirs
-        obs["player_2_elixirs"] = self.arena.player_side_2.elixirs
+        obs["player_1_elixirs"] = int(self.arena.player_side_1.elixirs)
+        obs["player_2_elixirs"] = int(self.arena.player_side_2.elixirs)
 
         ### Cards ###
         obs["player_1_cards"], obs["player_2_cards"] = [], []
         for obj in self.arena.objects:
+            if isinstance(obj, CrownTower):
+                continue
+            
             owner = obs["player_1_cards"] if obj.owner == self.arena.player_side_1 else obs["player_2_cards"]
             owner.append({
                 "deploy_cost": obj.deploy_cost,
                 "deploy_delay": obj.deploy_delay,
 
                 "entity_type": obj.entity_type,
-                "target_type": np.array(
-                    [
-                        EntityType.GROUND   in obj.target_types,
-                        EntityType.AIR      in obj.target_types,
-                        EntityType.BUILDING in obj.target_types,
-                    ], 
-                    dtype=np.int8
-                ),
+                "target_types": np.array([
+                    int(EntityType.GROUND   in obj.target_types),
+                    int(EntityType.AIR      in obj.target_types),
+                    int(EntityType.BUILDING in obj.target_types),
+                ], dtype=np.int8),
 
                 "position": np.array([obj.position.x, obj.position.y]),
                 
@@ -171,6 +167,16 @@ class ClashRoyaleEnv(gym.Env):
                     tower = side.princess_tower_2
 
                 obs[f"{side_name}_crown_towers"][tower_name] = {
+                    "deploy_cost": tower.deploy_cost,
+                    "deploy_delay": tower.deploy_delay,
+
+                    "entity_type": tower.entity_type,
+                    "target_types": np.array([
+                        int(EntityType.GROUND   in tower.target_types),
+                        int(EntityType.AIR      in tower.target_types),
+                        int(EntityType.BUILDING in tower.target_types),
+                    ], dtype=np.int8),
+                    
                     "position": np.array([tower.position.x, tower.position.y]),
 
                     "health": tower.health,
@@ -328,6 +334,9 @@ if __name__ == "__main__":
 
     # env = ClashRoyaleEnv()  # Works but the latter has some useful checks
     env = gym.make("ClashRoyaleEnv-v0", render_mode="rgb_array")
+
+    env = CRFlattenNormWrapper(env)
+
     env = gym.wrappers.RecordVideo(
         env,
         video_folder="./videos",
@@ -379,11 +388,11 @@ if __name__ == "__main__":
             player_1_spawn_cooldown += 1/100
             # player_2_spawn_cooldown += 1/100
 
-            # print("-----")
+            print("-----")
             # print(next_state["game_completion_fraction"])
-            # print("action", action)
-            # print("next_state", next_state)
-            print("reward", reward)
+            print("action", action)
+            print("next_state", next_state)
+            # print("reward", reward)
             # print("termination", termination)
             # print("truncated", truncated)
 

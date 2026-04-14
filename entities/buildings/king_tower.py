@@ -4,6 +4,7 @@ from entities.projectiles.arrow import Arrow
 from entities.projectile_shooter import ProjectileShooter
 
 
+@EntityRegistry.register("KingTower")
 class KingTower(CrownTower, ProjectileShooter):
     def __init__(
         self, owner, row: int, col: int, 

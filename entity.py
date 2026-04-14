@@ -17,6 +17,36 @@ class EntityType:
         return 3
 
 
+class EntityRegistry:
+    _registry = {}
+    _dummy_instances = {}
+
+    @classmethod
+    def register(cls, name):
+        def decorator(subclass):
+            cls._registry[name] = subclass
+            cls._dummy_instances[name] = subclass(None, -1, -1, width=-1, height=-1)
+            return subclass
+        return decorator
+
+    @classmethod
+    def get(cls, name):
+        return cls._registry[name]
+
+    @classmethod
+    def all(cls):
+        return cls._registry.values()
+
+    @classmethod
+    def aggregate(cls, attr):
+        values = [getattr(inst, attr) for inst in cls._dummy_instances.values() if hasattr(inst, attr)]
+        return {
+            "mean": sum(values) / len(values) if values else 0,
+            "min": min(values),
+            "max": max(values),
+        }
+
+
 class Entity:
     # TODO: make a child class called "Card" that defines abstraction for buildings and troops 
     # while projectile can be merged as a child of this class to stay DRY

@@ -260,7 +260,6 @@ class Arena:
             return False
 
         # 3. Add to self.objects
-        # self.objects.add(deploy_me)
         self.deploy_buffer.add(deploy_me)
 
         # 4. Subtract player's elixirs and return True
@@ -276,8 +275,6 @@ class Arena:
         
         Can also be used to "unoccupy" cells
         """
-
-        # assert len(mask.shape) == 2
 
         if isinstance(mask_pos, Vector2):
             mask_pos = (int(mask_pos.x), int(mask_pos.y))

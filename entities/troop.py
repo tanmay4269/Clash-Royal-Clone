@@ -34,6 +34,7 @@ class Troop(Entity):
         attack_radius: AttackRadius,
         hit_speed, first_hit_speed,
         target_types,
+        **kwargs
     ):
         """
         speed: ??   # TODO: what units are these
@@ -49,6 +50,7 @@ class Troop(Entity):
             radius + attack_radius,
             hit_speed, first_hit_speed,
             target_types,
+            **kwargs
         )
         
         # Physical Attributes

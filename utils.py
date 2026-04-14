@@ -6,7 +6,7 @@ import numpy as np
 import pygame
 from pygame import Vector2
 
-from entity import EntityType
+from entity import EntityType, EntityRegistry
 
 
 LIGHT_BLUE = "#8BCEF7"

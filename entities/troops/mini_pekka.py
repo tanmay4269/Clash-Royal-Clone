@@ -2,8 +2,9 @@ from utils import *
 from entities.troop import Troop
 
 
+@EntityRegistry.register("MiniPEKKA")
 class MiniPEKKA(Troop):
-    def __init__(self, owner, row, col):
+    def __init__(self, owner, row, col, **kwargs):
         super().__init__(
             owner, row, col, 
             deploy_cost=4, deploy_delay=1.0,

@@ -11,7 +11,7 @@ class PlayerSide:
         self.princess_tower_1 = None  # The one closer to (0, 0) 
         self.princess_tower_2 = None
 
-        self.elixirs = 5.0  # init
+        self.elixirs = 0.0  # init
         self.max_elixirs = 10  # TODO: move this up to arena class, pass as arg
         self.elixirs_per_sec = 1.0
         self._elixir_timer = 0.0
