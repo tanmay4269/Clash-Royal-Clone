@@ -1,5 +1,5 @@
 from utils import *
-from ppo_self_play.utils import CRFlattenNormWrapper
+from cr_flatten_norm_wrapper import CRFlattenNormWrapper
 
 import gymnasium as gym
 from gymnasium import spaces
