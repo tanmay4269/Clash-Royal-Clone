@@ -5,10 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File",
+            "name": "Python Debugger",
             "type": "debugpy",
             "request": "launch",
-            "program": "gym_env.py",
+            "program": "ppo_trainer.py",
             "console": "integratedTerminal",
             "justMyCode": false
         }

@@ -14,7 +14,7 @@ from entities.troops import *
 
 register(
     id="ClashRoyaleEnv-v0",
-    entry_point="gym_env:ClashRoyaleEnv",
+    entry_point="cr_gym_env:ClashRoyaleEnv",
 )
 
 class ClashRoyaleEnv(gym.Env):
@@ -77,7 +77,7 @@ class ClashRoyaleEnv(gym.Env):
         })
 
         ### Action Space ###
-        NUM_CARDS_IN_DECK = 3  # TODO: ofc find a better way
+        self.NUM_CARDS_IN_DECK = 3  # TODO: ofc find a better way
         position_space = spaces.Box(  
             low=np.array([0.0, 0.0]),
             high=np.array([
@@ -89,11 +89,11 @@ class ClashRoyaleEnv(gym.Env):
 
         self.action_space = spaces.Dict({
             "player_1_skip": spaces.Discrete(2), # bool
-            "player_1_card_idx": spaces.Discrete(NUM_CARDS_IN_DECK),
+            "player_1_card_idx": spaces.Discrete(self.NUM_CARDS_IN_DECK),
             "player_1_card_position": position_space,
 
             "player_2_skip": spaces.Discrete(2), # bool
-            "player_2_card_idx": spaces.Discrete(NUM_CARDS_IN_DECK),
+            "player_2_card_idx": spaces.Discrete(self.NUM_CARDS_IN_DECK),
             "player_2_card_position": position_space,
         })
 

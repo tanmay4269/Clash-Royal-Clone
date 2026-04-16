@@ -6,6 +6,7 @@ from addict import Dict
 
 import torch as t
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 
 from network import ActorCritic
@@ -22,6 +23,10 @@ class Trainer:
         self.gym_env_name = gym_env_name
         self.env = gym.make(self.gym_env_name)
         self.env = CRFlattenNormWrapper(self.env)
+
+        self.arena = self.env.env.env.env.arena
+        self.max_num_objects = self.arena.max_num_objects
+
 
         self.cfg = Dict()
 
@@ -50,12 +55,13 @@ class Trainer:
         self.cfg.network.entity_encoder_mid_ch = 64
         self.cfg.network.entity_encoder_out_ch = 32
 
-        self.cfg.network.trunk_extra_in_ch = 2 + 3 * self.cfg.network.entity_encoder_out_ch
+        self.cfg.network.trunk_extra_in_ch = 2
         self.cfg.network.trunk_mid_ch = 128
         
-        self.cfg.network.num_cards_in_deck = self.env.NUM_CARDS_IN_DECK
-        self.cfg.network.position_space_width = self.env.arena.width
-        self.cfg.network.position_space_height = self.env.arena.height
+        self.cfg.network.num_cards_in_deck = self.env.env.env.env.NUM_CARDS_IN_DECK
+        self.cfg.network.max_num_cards = self.max_num_objects
+        self.cfg.network.position_space_width = self.arena.width
+        self.cfg.network.position_space_height = self.arena.height
 
         # Replay storing
         self.video_dir = "./videos"
@@ -83,10 +89,10 @@ class Trainer:
         global_step = 0
         next_video = 0
 
-        self.record_episode(step=0, weights=None)
+        self.record_episode(step=0, player1_weights=None, player2_weights=None)
 
-        while global_step < self.cfg.max_steps:
-            ...
+        # while global_step < self.cfg.max_steps:
+        #     ...
 
 
     def get_network_and_optimiser(self, weights=None):
@@ -116,10 +122,92 @@ class Trainer:
 
         return network, optimiser
 
+
+    def split_observations(self, obs):
+        player_1_num_cards = len(obs["player_1_cards"])
+        player_2_num_cards = len(obs["player_2_cards"])
+
+        if player_1_num_cards == 0:
+            obs["player_1_cards"] = [np.zeros(self.env.flat_card_space.shape)]
+            player_1_num_cards = 1
+        if player_2_num_cards == 0:
+            obs["player_2_cards"] = [np.zeros(self.env.flat_card_space.shape)]
+            player_2_num_cards = 1
+
+        player_1_cards = F.pad(
+            t.tensor(np.array(obs["player_1_cards"])),  # (X, 26)
+            (0, 0, 0, self.max_num_objects - player_1_num_cards),            # (N, 26)
+            "constant", 0
+        ).unsqueeze(0)
+
+        player_2_cards = F.pad(
+            t.tensor(np.array(obs["player_2_cards"])),
+            (0, 0, 0, self.max_num_objects - player_2_num_cards),
+            "constant", 0
+        ).unsqueeze(0)
+
+        player_1_crown_towers = t.tensor(np.array(obs["player_1_crown_towers"])).unsqueeze(0)
+        player_2_crown_towers = t.tensor(np.array(obs["player_2_crown_towers"])).unsqueeze(0)
+
+        obs_1 = {
+            "game_completion_fraction": t.tensor(np.array(obs["game_completion_fraction"])).reshape(-1, 1),
+            "elixirs":                  t.tensor(np.array(obs["player_1_elixirs"])).reshape(-1, 1),
+            "my_cards":                 player_1_cards,
+            "opponent_cards":           player_2_cards,
+            "my_crown_towers":          player_1_crown_towers,
+            "opponent_crown_towers":    player_2_crown_towers,
+        }
+
+        # Indices 5 & 6 are x & y coords for their position
+        # Flipping them is just a 180 degree rotation about the origin
+        # (x, y) -> (width_cell / 2 - x, height_cell / 2 - y)
+        width_cell  = self.arena.tile_size * self.arena.width
+        height_cell = self.arena.tile_size * self.arena.height
+        
+        # Doing this to prevent zero padded entries to falsely invert
+        player_1_cards = t.tensor(np.array(obs["player_1_cards"]))
+        player_2_cards = t.tensor(np.array(obs["player_2_cards"]))
+
+        player_1_cards[..., 5] = width_cell/2  - player_1_cards[..., 5]
+        player_1_cards[..., 6] = height_cell/2 - player_1_cards[..., 6]
+
+        player_2_cards[..., 5] = width_cell/2  - player_2_cards[..., 5]
+        player_2_cards[..., 6] = height_cell/2 - player_2_cards[..., 6]
+
+        player_1_cards = F.pad(
+            player_1_cards,  # (X, 26)
+            (0, 0, 0, self.max_num_objects - player_1_num_cards),            # (N, 26)
+            "constant", 0
+        ).unsqueeze(0)
+
+        player_2_cards = F.pad(
+            player_2_cards,
+            (0, 0, 0, self.max_num_objects - player_2_num_cards),
+            "constant", 0
+        ) .unsqueeze(0)
+
+        player_1_crown_towers[..., 5] = width_cell/2  - player_1_crown_towers[..., 5]
+        player_1_crown_towers[..., 6] = height_cell/2 - player_1_crown_towers[..., 6]
+
+        player_2_crown_towers[..., 5] = width_cell/2  - player_2_crown_towers[..., 5]
+        player_2_crown_towers[..., 6] = height_cell/2 - player_2_crown_towers[..., 6]
+
+        obs_2 = {
+            "game_completion_fraction": t.tensor(np.array(obs["game_completion_fraction"])).reshape(-1, 1),
+            "elixirs":                  t.tensor(np.array(obs["player_2_elixirs"])).reshape(-1, 1),
+            "my_cards":                 player_2_cards,
+            "opponent_cards":           player_1_cards,
+            "my_crown_towers":          player_2_crown_towers,
+            "opponent_crown_towers":    player_1_crown_towers,
+        }
+
+        return obs_1, obs_2
     
-    def record_episode(self, step, weights=None):
+
+    def record_episode(self, step, player1_weights=None, player2_weights=None):
         """Run one greedy episode and save video to self.video_dir."""
 
+        # TODO: move to __init__
         rec_env = gym.make(self.gym_env_name, render_mode="rgb_array")
         rec_env = CRFlattenNormWrapper(rec_env)
         rec_env = gym.wrappers.RecordVideo(
@@ -129,17 +217,37 @@ class Trainer:
             episode_trigger=lambda _: True,
         )
         
-        net, _ = self.get_network_and_optimiser(weights)
+        net_1, _ = self.get_network_and_optimiser(player1_weights)
+        net_2, _ = self.get_network_and_optimiser(player2_weights)
         state, _ = rec_env.reset()
         
-        ep_return = 0.0
+        ep_return = np.zeros(2)
         while True:
-            with torch.no_grad():
-                action, _, _, _ = net.get_action_and_value(state)
+            state_1, state_2  = self.split_observations(state)
         
+            with t.no_grad():
+                action_1, _, _, _ = net_1.get_action_and_value(state_1)
+                action_2, _, _, _ = net_2.get_action_and_value(state_2)
+        
+            action = {
+                "player_1_skip":          int(action_1["skip"] > 0.5),
+                "player_1_card_idx":      action_1["deck_idx"],
+                "player_1_card_position": (
+                    action_1["position"] % self.arena.width,
+                    action_1["position"] // self.arena.height
+                ),
+
+                "player_2_skip":          int(action_2["skip"] > 0.5),
+                "player_2_card_idx":      action_2["deck_idx"],
+                "player_2_card_position": (
+                    action_2["position"] % self.arena.width,
+                    action_2["position"] // self.arena.height
+                ),
+            }
+
             state, reward, terminated, truncated, _ = rec_env.step(action)
         
-            ep_return += reward
+            ep_return += np.array(reward)
         
             if terminated or truncated:
                 break
@@ -150,20 +258,19 @@ class Trainer:
         
         return ep_return
 
-
     
-    def set_seed(seed: int = 42):
+    def set_seed(self, seed: int = 42):
         random.seed(seed)
         os.environ["PYTHONHASHSEED"] = str(seed)
         np.random.seed(seed)
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+        t.manual_seed(seed)
+        t.cuda.manual_seed(seed)
+        t.cuda.manual_seed_all(seed)
+        t.backends.cudnn.deterministic = True
+        t.backends.cudnn.benchmark = False
 
 
 if __name__ == "__main__":
     trainer = Trainer(gym_env_name="ClashRoyaleEnv-v0")
 
-    print(trainer.env.flat_card_space.shape[0])
+    trainer.train()

@@ -14,11 +14,13 @@ class ActorCritic(nn.Module):
         trunk_mid_ch,
 
         num_cards_in_deck,
+        max_num_cards,
         position_space_width,
         position_space_height,
     ):
         super().__init__()
 
+        self.max_num_cards = max_num_cards
         self.position_space_width  = position_space_width
         self.position_space_height = position_space_height
 
@@ -36,7 +38,7 @@ class ActorCritic(nn.Module):
         )
 
         self.trunk = nn.Sequential(
-            nn.Linear(trunk_extra_in_ch + entity_encoder_out_ch, trunk_mid_ch),
+            nn.Linear(trunk_extra_in_ch + (3 + 3 + 1 + 1) * entity_encoder_out_ch, trunk_mid_ch),
             nn.LayerNorm(trunk_mid_ch),
             nn.ReLU(),
 
@@ -52,7 +54,7 @@ class ActorCritic(nn.Module):
         self.actor_skip_mu = nn.Sequential(
             nn.Linear(trunk_mid_ch, 1)
         )
-        self.actor_skip_log_std = nn.Parameter(torch.zeros(1))
+        self.actor_skip_log_std = nn.Parameter(t.zeros(1))
 
         self.actor_deck_idx_net = nn.Sequential(
             nn.Linear(trunk_mid_ch, num_cards_in_deck)
@@ -60,9 +62,7 @@ class ActorCritic(nn.Module):
 
         self.actor_position_net = nn.Sequential(
             nn.Linear(trunk_mid_ch, position_space_width * position_space_height)
-            # nn.ConvTranspose2d(trunk_extra_in_ch), 
         )
-
 
 
     def forward(self, obs):
@@ -70,21 +70,37 @@ class ActorCritic(nn.Module):
         obs, which is just one player's, is expected to be a dict with:
         - game_completion_fraction: (B, 1)
         - elixirs: (B, 1)
-        - cardss: (B, N, 26), 
-            - where N is the upper cap on number of entitys at once on the arena
+        - my_cards: (B, N, 26)
+            - where N is the upper cap on number of entities at once on the arena
             - zero padding is used
-        - crown_towers: (B, 3, 26)
+        - opponent_cards: (B, N, 26)
+        - my_crown_towers: (B, 3, 26)
+        - opponent_crown_towers: (B, 3, 26)
         """
+        
+        all_entities = t.cat([
+            obs["my_cards"], 
+            obs["opponent_cards"], 
+            obs["my_crown_towers"], 
+            obs["opponent_crown_towers"], 
+        ], dim=1).to(dtype=t.float32)
 
-        card_embeddings  = self.entity_encoder(obs["cards"])         # (B, N, entity_encoder_out_ch)
-        tower_embeddings = self.entity_encoder(obs["crown_towers"])  # (B, 3, entity_encoder_out_ch)
+        all_embeddings = self.entity_encoder(all_entities)
+
+        my_card_embeddings       = all_embeddings[:, 0 : self.max_num_cards]
+        opponent_card_embeddings = all_embeddings[:, self.max_num_cards : 2 * self.max_num_cards]
+
+        my_crown_tower_embeddings       = all_embeddings[:, 2 * self.max_num_cards : 2 * self.max_num_cards + 3]
+        opponent_crown_tower_embeddings = all_embeddings[:, 2 * self.max_num_cards + 3 :]
 
         trunk_input = t.cat([
             obs["game_completion_fraction"],
             obs["elixirs"],
-            tower_embeddings.flatten(start_dim=1),  # (B, 3 * entity_encoder_out_ch)
-            entity_embeddings.mean(dim=1),          # (B, entity_encoder_out_ch)
-        ], dim=-1)  # (B, trunk_extra_in_ch + entity_encoder_out_ch)
+            my_crown_tower_embeddings.flatten(start_dim=1),        # (B, 3 * entity_encoder_out_ch)
+            opponent_crown_tower_embeddings.flatten(start_dim=1),  # (B, 3 * entity_encoder_out_ch)
+            my_card_embeddings.mean(dim=1),        # (B, entity_encoder_out_ch)
+            opponent_card_embeddings.mean(dim=1),  # (B, entity_encoder_out_ch)
+        ], dim=-1).to(dtype=t.float32)  # (B, trunk_extra_in_ch + entity_encoder_out_ch)
 
         trunk_out = self.trunk(trunk_input)
 
@@ -147,9 +163,9 @@ class ActorCritic(nn.Module):
         entropy = skip_entropy + deck_entropy + pos_entropy
 
         action = {
-            "skip": action_skip.detach(), 
-            "deck_idx": action_deck.detach(), 
-            "position": action_pos.detach()
+            "skip": action_skip.detach().item(), 
+            "deck_idx": action_deck.detach().item(), 
+            "position": action_pos.detach().item()
         }
 
         return action, log_prob, entropy, value

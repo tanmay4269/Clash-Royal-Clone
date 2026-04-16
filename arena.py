@@ -20,6 +20,7 @@ class Arena:
         self.width = 18  # In tiles
         self.height = 32
 
+        self.max_num_objects = 32  # Arbitrary
         self.objects: Set[Entity] = set()  # Contains all in game objects that have been deployed like buildings, troupes, etc.
         self.deploy_buffer = set()         # Contains items that haven't deployed yet but need to be rendered
 
@@ -61,6 +62,7 @@ class Arena:
 
         self.elapsed_time = 0
         self.game_duration = 90  # sec
+        
         self._font = None
 
         # * DEBUG *
@@ -189,7 +191,11 @@ class Arena:
                 deployed_objs.add(obj)
         
         for obj in deployed_objs:
-            self.objects.add(obj)
+            if len(self.objects) < self.max_num_objects:
+                self.objects.add(obj)
+                # ! ADD TO PLAYER OBJECTS TOO
+            else:
+                print("[WARN: Arena::update] Buffer Management: Can't deploy since max num objects has been reached")
             self.deploy_buffer.remove(obj)
 
 
@@ -234,7 +240,7 @@ class Arena:
         # * DEBUG * 
         if self._debug_active_player == 1:
             troop = self._debug_active_card(self.player_side_1, tile_row + 1, tile_col + 1)
-            self.player_side_1.add_object(troop)
+            self.player_side_1.add_object(troop)  # ! ADD ONLY AFTER BUFFER DEPLOYS
         else:
             troop = self._debug_active_card(self.player_side_2, tile_row + 1, tile_col + 1)
             self.player_side_2.add_object(troop)
