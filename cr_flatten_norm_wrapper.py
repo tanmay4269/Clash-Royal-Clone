@@ -1,5 +1,5 @@
 from gymnasium import spaces
-from gymnasium.spaces.utils import flatten, flatten_space
+from gymnasium.spaces.utils import flatten, flatten_space, flatdim
 import gymnasium as gym
 import numpy as np
 
@@ -17,6 +17,14 @@ class CRFlattenNormWrapper(gym.ObservationWrapper):
 
         self.flat_card_space  = flatten_space(self._card_space)
         self.flat_tower_space = flatten_space(self._tower_space)
+
+        self.flattened_card_space_indices = {}
+        cursor = 0
+        for key in sorted(self._card_space.spaces.keys()):  # Dict spaces are sorted alphabetically
+            dim = flatdim(self._card_space.spaces[key])
+            self.flattened_card_space_indices[key] = (cursor, cursor + dim)
+            cursor += dim
+        print(self.flattened_card_space_indices)
 
         # Precompute normalization constants from flattened space bounds
         self._card_mid,  self._card_half  = self._bounds(self.flat_card_space)

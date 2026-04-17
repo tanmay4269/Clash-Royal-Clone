@@ -3,6 +3,7 @@ import random
 import numpy as np
 
 from addict import Dict
+from rich import print
 
 import torch as t
 import torch.nn as nn
@@ -135,8 +136,8 @@ class Trainer:
             player_2_num_cards = 1
 
         player_1_cards = F.pad(
-            t.tensor(np.array(obs["player_1_cards"])),  # (X, 26)
-            (0, 0, 0, self.max_num_objects - player_1_num_cards),            # (N, 26)
+            t.tensor(np.array(obs["player_1_cards"])),  # (X, card_dim)
+            (0, 0, 0, self.max_num_objects - player_1_num_cards),            # (N, card_dim)
             "constant", 0
         ).unsqueeze(0)
 
@@ -158,25 +159,25 @@ class Trainer:
             "opponent_crown_towers":    player_2_crown_towers,
         }
 
-        # Indices 5 & 6 are x & y coords for their position
         # Flipping them is just a 180 degree rotation about the origin
-        # (x, y) -> (width_cell / 2 - x, height_cell / 2 - y)
+        # (x, y) -> (width_cell - x, height_cell - y)
         width_cell  = self.arena.tile_size * self.arena.width
         height_cell = self.arena.tile_size * self.arena.height
+        position_x_idx, position_y_idx = np.arange(*self.env.flattened_card_space_indices["position"])
         
         # Doing this to prevent zero padded entries to falsely invert
         player_1_cards = t.tensor(np.array(obs["player_1_cards"]))
         player_2_cards = t.tensor(np.array(obs["player_2_cards"]))
 
-        player_1_cards[..., 5] = width_cell/2  - player_1_cards[..., 5]
-        player_1_cards[..., 6] = height_cell/2 - player_1_cards[..., 6]
+        player_1_cards[..., position_x_idx] = width_cell  - player_1_cards[..., position_x_idx]
+        player_1_cards[..., position_y_idx] = height_cell - player_1_cards[..., position_y_idx]
 
-        player_2_cards[..., 5] = width_cell/2  - player_2_cards[..., 5]
-        player_2_cards[..., 6] = height_cell/2 - player_2_cards[..., 6]
+        player_2_cards[..., position_x_idx] = width_cell  - player_2_cards[..., position_x_idx]
+        player_2_cards[..., position_y_idx] = height_cell - player_2_cards[..., position_y_idx]
 
         player_1_cards = F.pad(
-            player_1_cards,  # (X, 26)
-            (0, 0, 0, self.max_num_objects - player_1_num_cards),            # (N, 26)
+            player_1_cards,  # (X, card_dim)
+            (0, 0, 0, self.max_num_objects - player_1_num_cards),            # (N, card_dim)
             "constant", 0
         ).unsqueeze(0)
 
@@ -186,11 +187,11 @@ class Trainer:
             "constant", 0
         ) .unsqueeze(0)
 
-        player_1_crown_towers[..., 5] = width_cell/2  - player_1_crown_towers[..., 5]
-        player_1_crown_towers[..., 6] = height_cell/2 - player_1_crown_towers[..., 6]
+        player_1_crown_towers[..., position_x_idx] = width_cell  - player_1_crown_towers[..., position_x_idx]
+        player_1_crown_towers[..., position_y_idx] = height_cell - player_1_crown_towers[..., position_y_idx]
 
-        player_2_crown_towers[..., 5] = width_cell/2  - player_2_crown_towers[..., 5]
-        player_2_crown_towers[..., 6] = height_cell/2 - player_2_crown_towers[..., 6]
+        player_2_crown_towers[..., position_x_idx] = width_cell  - player_2_crown_towers[..., position_x_idx]
+        player_2_crown_towers[..., position_y_idx] = height_cell - player_2_crown_towers[..., position_y_idx]
 
         obs_2 = {
             "game_completion_fraction": t.tensor(np.array(obs["game_completion_fraction"])).reshape(-1, 1),
@@ -222,39 +223,43 @@ class Trainer:
         state, _ = rec_env.reset()
         
         ep_return = np.zeros(2)
-        while True:
-            state_1, state_2  = self.split_observations(state)
-        
-            with t.no_grad():
-                action_1, _, _, _ = net_1.get_action_and_value(state_1)
-                action_2, _, _, _ = net_2.get_action_and_value(state_2)
-        
-            action = {
-                "player_1_skip":          int(action_1["skip"] > 0.5),
-                "player_1_card_idx":      action_1["deck_idx"],
-                "player_1_card_position": (
-                    action_1["position"] % self.arena.width,
-                    action_1["position"] // self.arena.height
-                ),
+        try:
+            while True:
+                state_1, state_2  = self.split_observations(state)
+                
+                with t.no_grad():
+                    action_1, _, _, _ = net_1.get_action_and_value(state_1)
+                    action_2, _, _, _ = net_2.get_action_and_value(state_2)
+            
+                action = {
+                    "player_1_skip":          int(action_1["skip"] > 0.5),
+                    "player_1_card_idx":      action_1["deck_idx"],
+                    "player_1_card_position": (
+                        action_1["position"] % self.arena.width,
+                        action_1["position"] // self.arena.height
+                    ),
 
-                "player_2_skip":          int(action_2["skip"] > 0.5),
-                "player_2_card_idx":      action_2["deck_idx"],
-                "player_2_card_position": (
-                    action_2["position"] % self.arena.width,
-                    action_2["position"] // self.arena.height
-                ),
-            }
+                    "player_2_skip":          int(action_2["skip"] > 0.5),
+                    "player_2_card_idx":      action_2["deck_idx"],
+                    "player_2_card_position": (
+                        self.arena.width  - action_2["position"] % self.arena.width,
+                        self.arena.height - action_2["position"] // self.arena.height
+                    ),
+                }
 
-            state, reward, terminated, truncated, _ = rec_env.step(action)
-        
-            ep_return += np.array(reward)
-        
-            if terminated or truncated:
-                break
+                state, reward, terminated, truncated, _ = rec_env.step(action)
+            
+                ep_return += np.array(reward)
+            
+                if terminated or truncated:
+                    break
+
+        except Exception as e:
+            print(e)
         
         rec_env.close()
         
-        print(f"\t [video] step {step}:\t return: {ep_return:.1f}")
+        print(f"\t [video] step {step}:\t return: {ep_return}")
         
         return ep_return
 

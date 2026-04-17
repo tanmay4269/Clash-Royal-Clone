@@ -238,16 +238,16 @@ class Arena:
         tile_col = mouse_x // self.tile_size
 
         # * DEBUG * 
+        owner = None
         if self._debug_active_player == 1:
             troop = self._debug_active_card(self.player_side_1, tile_row + 1, tile_col + 1)
-            self.player_side_1.add_object(troop)  # ! ADD ONLY AFTER BUFFER DEPLOYS
+            owner = self.player_side_1
         else:
             troop = self._debug_active_card(self.player_side_2, tile_row + 1, tile_col + 1)
-            self.player_side_2.add_object(troop)
+            owner = self.player_side_2
         
-        if self.deploy_entity(troop) is False:
-            # print("Failed deploying troop")
-            ...
+        if self.deploy_entity(troop):
+            owner.add_object(troop)
 
 
     def deploy_entity(self, deploy_me: Entity) -> bool:

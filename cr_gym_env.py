@@ -29,7 +29,7 @@ class ClashRoyaleEnv(gym.Env):
 
         def get_entity_space():
             return spaces.Dict({
-                "deploy_cost": spaces.Discrete(self.arena.player_side_1.max_elixirs + 1),
+                "deploy_cost": spaces.Box(0.0, self.arena.player_side_1.max_elixirs),
                 "deploy_delay": spaces.Box(0.0, 10.0),
                 
                 "entity_type": spaces.Discrete(EntityType.num_types()), 
@@ -189,7 +189,6 @@ class ClashRoyaleEnv(gym.Env):
                     "first_hit_speed": tower.first_hit_speed
                 }
 
-
         return obs
 
 
@@ -235,8 +234,8 @@ class ClashRoyaleEnv(gym.Env):
                 card = MiniPEKKA
 
             card_instance = card(owner, y, x)
-            owner.add_object(card_instance)
-            self.arena.deploy_entity(card_instance)
+            if self.arena.deploy_entity(card_instance):
+                owner.add_object(card_instance)
 
         prev_obs = self._cur_obs  # Saving for reward calculation
         

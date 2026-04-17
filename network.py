@@ -70,12 +70,12 @@ class ActorCritic(nn.Module):
         obs, which is just one player's, is expected to be a dict with:
         - game_completion_fraction: (B, 1)
         - elixirs: (B, 1)
-        - my_cards: (B, N, 26)
+        - my_cards: (B, N, card_dim)
             - where N is the upper cap on number of entities at once on the arena
             - zero padding is used
-        - opponent_cards: (B, N, 26)
-        - my_crown_towers: (B, 3, 26)
-        - opponent_crown_towers: (B, 3, 26)
+        - opponent_cards: (B, N, card_dim)
+        - my_crown_towers: (B, 3, card_dim)
+        - opponent_crown_towers: (B, 3, card_dim)
         """
         
         all_entities = t.cat([
@@ -122,6 +122,11 @@ class ActorCritic(nn.Module):
         invalid_deck_mask=None,
         invalid_position_mask=None,
     ):
+        """
+        obs: same as that taken by self.forward
+        invalid_deck_mask: based on elixir or something more realistic like CR's random sampling in the deck
+        invalid_position_mask: just your half of the arena is deployable into
+        """
         value, skip_mu, skip_std, deck_logits, pos_logits = self(obs)
 
         if invalid_deck_mask is not None:
