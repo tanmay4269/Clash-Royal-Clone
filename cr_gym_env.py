@@ -37,7 +37,6 @@ class ClashRoyaleEnv(gym.Env):
                 "target_types": spaces.MultiBinary(EntityType.num_types()), 
 
                 # x, y
-                # TODO: reconsider if this should rather be discrete
                 "position": spaces.Box(  
                     low=np.array([0.0, 0.0]),
                     high=np.array([

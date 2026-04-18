@@ -157,12 +157,12 @@ class RolloutBuffer:
     def push(self, state, action, log_prob, reward, value, done):
         """state, action, log_prob, reward, value, done -> None (advances ptr)"""
 
-        self.states[self.ptr]      = state
-        self.actions[self.ptr]     = action
-        self.log_probs[self.ptr]   = log_prob
-        self.rewards[self.ptr]     = reward
-        self.values[self.ptr]      = value
-        self.dones[self.ptr]       = done
+        self.states[self.ptr]    = state
+        self.actions[self.ptr]   = action
+        self.log_probs[self.ptr] = log_prob
+        self.rewards[self.ptr]   = reward
+        self.values[self.ptr]    = value
+        self.dones[self.ptr]     = done
 
         self.ptr += 1
 
@@ -201,6 +201,9 @@ class RolloutBuffer:
                 torch.tensor(self.advantages[batch_idx]),
                 torch.tensor(self.returns[batch_idx]),
             )
+
+    def reset(self):
+        self.ptr = 0
 
 
 buffer = RolloutBuffer(ROLLOUT_STEPS, obs_dim, act_dim)

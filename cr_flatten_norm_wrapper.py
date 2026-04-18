@@ -24,7 +24,6 @@ class CRFlattenNormWrapper(gym.ObservationWrapper):
             dim = flatdim(self._card_space.spaces[key])
             self.flattened_card_space_indices[key] = (cursor, cursor + dim)
             cursor += dim
-        print(self.flattened_card_space_indices)
 
         # Precompute normalization constants from flattened space bounds
         self._card_mid,  self._card_half  = self._bounds(self.flat_card_space)

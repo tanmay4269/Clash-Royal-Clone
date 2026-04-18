@@ -215,14 +215,14 @@ class Arena:
                 self.player_side_2.remove_object(obj)
             
             if obj == self.player_side_1.king_tower:
-                print("Player 2 won!")
+                # print("Player 2 won!")
                 return True, False
             elif obj == self.player_side_2.king_tower:
-                print("Player 1 won!")
+                # print("Player 1 won!")
                 return True, False
 
             self.objects.remove(obj)
-            del obj
+            # del obj
 
 
         ### Elixir Update ###

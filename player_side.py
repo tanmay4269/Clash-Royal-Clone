@@ -43,7 +43,9 @@ class PlayerSide:
 
 
     def remove_object(self, obj):
-        self.objects.remove(obj)
+        if obj in self.objects:
+            self.objects.remove(obj)
+            del obj
 
 
     def set_opponent(self, opponent):

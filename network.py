@@ -104,7 +104,7 @@ class ActorCritic(nn.Module):
 
         trunk_out = self.trunk(trunk_input)
 
-        value = self.critic(trunk_out)  # (B, 1)
+        value = self.critic(trunk_out).squeeze(-1)  # (B,)
 
         skip_mu = self.actor_skip_mu(trunk_out)
         skip_std = self.actor_skip_log_std.clamp(-20, 2).exp().expand_as(skip_mu)
@@ -168,9 +168,9 @@ class ActorCritic(nn.Module):
         entropy = skip_entropy + deck_entropy + pos_entropy
 
         action = {
-            "skip": action_skip.detach().item(), 
-            "deck_idx": action_deck.detach().item(), 
-            "position": action_pos.detach().item()
+            "skip": action_skip.detach(), 
+            "deck_idx": action_deck.detach(), 
+            "position": action_pos.detach()
         }
 
         return action, log_prob, entropy, value

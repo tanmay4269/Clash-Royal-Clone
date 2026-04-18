@@ -137,6 +137,10 @@ class Troop(Entity):
         #   TODO Wasteful approach, need to do something smarter
         prev_target = self.target
         self.set_target()
+        
+        if self.target is None:
+            return True
+
         if self.target != prev_target:
             self._is_first_hit = True
             self._attack_timer = 0  # Reset timer to discard stale delay from last attack

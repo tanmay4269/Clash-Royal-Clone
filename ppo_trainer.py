@@ -1,4 +1,6 @@
 import os
+from copy import deepcopy
+
 import random
 import numpy as np
 
@@ -16,39 +18,44 @@ import gymnasium as gym
 import cr_gym_env
 from cr_flatten_norm_wrapper import CRFlattenNormWrapper
 
+from rollout_buffer import RolloutBuffer
+
 import wandb
 
 
 class Trainer:
     def __init__(self, gym_env_name):
         self.gym_env_name = gym_env_name
+
         self.env = gym.make(self.gym_env_name)
         self.env = CRFlattenNormWrapper(self.env)
 
         self.arena = self.env.env.env.env.arena
         self.max_num_objects = self.arena.max_num_objects
 
-
+        # 
         self.cfg = Dict()
 
         self.cfg.seed = 42
         self.set_seed(self.cfg.seed)
 
-        # PPO Specific
-        self.cfg.gamma = 0.99
-        self.cfg.gae_lambda = 0.95
-        self.cfg.clip_eps = 0.2  # PPO clip range
-        self.cfg.k_epochs = 10   # gradient steps per rollout
-        self.cfg.rollout_steps = 2048  # timesteps to collect before each update
-        self.cfg.minibatch_size = 128
-        self.cfg.lr = 3e-4 
+        # Buffer Related
+        self.cfg.buffer.n_steps = 2048
+        self.cfg.buffer.gae_gamma = 0.99
+        self.cfg.buffer.gae_lambda = 0.95
 
-        self.cfg.max_entropy_coef = 0.005
-        self.cfg.min_entropy_coef = 0.005
-        self.cfg.entropy_coef = None
-
-        self.cfg.vf_coef = 0.5  # critic loss weight in combined loss
+        # PPO Update
+        self.cfg.ppo_clip = 0.2
         self.cfg.grad_clip = 0.5
+
+        # Loss
+        self.cfg.lr = 3e-4 
+        self.cfg.critic_loss_coef = 0.5
+        self.entropy_loss_coef = 0.005
+
+        # Misc
+        self.cfg.minibatch_size = 128
+        self.cfg.k_epochs = 10  # gradient steps per rollout
         self.cfg.max_steps = 100_000_000  # total env steps
 
         # Network Config
@@ -82,18 +89,180 @@ class Trainer:
 
     def train(self):
         self.set_seed(self.cfg.seed)
-        state, _ = self.env.reset()
 
-        ep_return = 0.0
+        ep_return = np.zeros(2)
         ep_returns = []
 
         global_step = 0
         next_video = 0
 
-        self.record_episode(step=0, player1_weights=None, player2_weights=None)
+        # * DEBUG *
+        net_1, optimiser_1 = self.get_network_and_optimiser()
+        net_2 = deepcopy(net_1)
 
-        # while global_step < self.cfg.max_steps:
-        #     ...
+        state, _ = self.env.reset()
+        state_1, state_2  = self.split_observations(state)
+
+        while global_step < self.cfg.max_steps:
+            buffer_1 = RolloutBuffer(**self.cfg.buffer.to_dict())
+            # buffer_2 = RolloutBuffer(**self.cfg.buffer.to_dict())
+
+            for _ in range(self.cfg.buffer.n_steps):
+                with t.no_grad():
+                    action_1, log_prob_1, entropy_1, value_1 = net_1.get_action_and_value(state_1)
+                    # action_2, log_prob_2, entropy_2, value_2 = net_2.get_action_and_value(state_2) 
+                    action_2, _, _, _ = net_2.get_action_and_value(state_2) 
+
+                action = self.join_actions(action_1, action_2)
+                next_state, reward, terminated, truncated, _ = self.env.step(action)
+                done = terminated or truncated
+
+                buffer_1.push(state_1, action_1, log_prob_1, reward[0], value_1, done)
+                # buffer_2.push(state_2, action_2, log_prob_2, reward[1], value_2, done)
+
+                state = next_state
+                state_1, state_2  = self.split_observations(state)
+
+                ep_return += np.array(reward)
+
+                if done:
+                    ep_returns.append(ep_return)
+                    ep_return = np.zeros(2)
+
+                    ep_seed = np.random.randint(0, 2**31)
+                    state, _ = self.env.reset(seed=ep_seed)
+                    state_1, state_2  = self.split_observations(state)
+
+                global_step += 1
+
+                if global_step >= next_video:
+                    self.record_episode(global_step, net_1, net_2)
+                    next_video += self.video_every
+
+            # Bootstrap final value and compute GAE
+            with t.no_grad():
+                _, _, _, last_value_1 = net_1.get_action_and_value(state_1)
+                # _, _, _, last_value_2 = net_2.get_action_and_value(state_2)
+                buffer_1.compute_gae(last_value_1, done)
+
+            # PPO update
+            actor_loss, critic_loss, entropy, ratio_mean, advantage_mean = self.ppo_update(buffer_1, net_1, optimiser_1)
+
+            buffer_1.reset()
+            # buffer_2.reset()
+
+            avg_100 = np.mean(ep_returns[-100:], axis=0)
+            avg_100_player_1 = avg_100[0]
+
+            print(
+                f"step {global_step:7d} | avg(last 100 eps): {avg_100_player_1} | "
+                f"actor_loss: {actor_loss:7.3f} | critic_loss: {critic_loss:7.3f} | entropy: {entropy:.3f}"
+            )
+
+            if self.wandb_logging:
+                wandb.log({
+                    "avg_100":        avg_100_player_1,
+                    "actor_loss":     actor_loss,
+                    "critic_loss":    critic_loss,
+                    "entropy":        entropy,
+                    "ratio_mean":     ratio_mean,
+                    "advantage_mean": advantage_mean
+                }, step=global_step)
+
+
+    def record_episode(self, step, net_1, net_2):
+        """Run one greedy episode and save video to self.video_dir."""
+
+        rec_env = gym.make(self.gym_env_name, render_mode="rgb_array")
+        rec_env = CRFlattenNormWrapper(rec_env)
+        rec_env = gym.wrappers.RecordVideo(
+            rec_env,
+            video_folder=self.video_dir,
+            name_prefix=f"step{step:07d}",
+            episode_trigger=lambda _: True,
+        )
+        
+        state, _ = rec_env.reset()
+        ep_return = np.zeros(2)
+
+        try:
+            while True:
+                state_1, state_2  = self.split_observations(state)
+                
+                with t.no_grad():
+                    action_1, _, _, _ = net_1.get_action_and_value(state_1)
+                    action_2, _, _, _ = net_2.get_action_and_value(state_2)
+            
+                action = self.join_actions(action_1, action_2)
+
+                state, reward, terminated, truncated, _ = rec_env.step(action)
+            
+                ep_return += np.array(reward)
+            
+                if terminated or truncated:
+                    break
+
+        except Exception as e:
+            print(e)
+        
+        rec_env.close()
+        
+        print(f"\t [video] step {step}:\t return: {ep_return}")
+        
+        return ep_return
+
+    
+    def ppo_update(self, buffer, net, optimiser):
+        # TODO: use an average meter instead 
+        num_steps = 0
+        total_actor_loss = 0
+        total_critic_loss = 0
+        total_entropy = 0
+        total_ratio_mean = 0
+        total_advantage_mean = 0
+
+        for epoch in range(self.cfg.k_epochs):
+            for batch in buffer.get_minibatches(self.cfg.minibatch_size):
+                states, actions, old_log_probs, advantages, returns = batch
+
+                # Actor Loss
+                _, new_log_probs, entropies, values = net.get_action_and_value(states, actions)
+                ratio = (new_log_probs - old_log_probs).exp()
+
+                actor_loss = -t.min(
+                    advantages * ratio, 
+                    advantages * t.clip(ratio, 1 - self.cfg.ppo_clip, 1 + self.cfg.ppo_clip)
+                ).mean()
+
+                # Critic Loss
+                G = returns
+                V = values
+                # critic_loss = ( (G - V) ** 2 ).mean()
+                critic_loss = F.smooth_l1_loss(input=V, target=G)
+
+                # Backprop
+                loss = actor_loss + self.cfg.critic_loss_coef * critic_loss - self.entropy_loss_coef * entropies.mean()
+
+                optimiser.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(net.parameters(),  self.cfg.grad_clip)
+                optimiser.step()
+
+                num_steps += 1
+                total_actor_loss  += actor_loss.item()
+                total_critic_loss += critic_loss.item()
+                total_entropy     += entropies.mean().item()
+
+                total_ratio_mean     += ratio.mean().item()
+                total_advantage_mean += advantages.mean().item()
+
+        return (
+            total_actor_loss     / num_steps,
+            total_critic_loss    / num_steps, 
+            total_entropy        / num_steps,
+            total_ratio_mean     / num_steps,
+            total_advantage_mean / num_steps,
+        )
 
 
     def get_network_and_optimiser(self, weights=None):
@@ -103,18 +272,6 @@ class Trainer:
         """
 
         network = ActorCritic(**self.cfg.network.to_dict())
-        # network = ActorCritic(
-        #     self.cfg.network.entity_encoder_in_ch,
-        #     self.cfg.network.entity_encoder_mid_ch, 
-        #     self.cfg.network.entity_encoder_out_ch,
-
-        #     self.cfg.network.trunk_extra_in_ch,
-        #     self.cfg.network.trunk_mid_ch,
-
-        #     self.cfg.network.num_cards_in_deck,
-        #     self.cfg.network.position_space_width,
-        #     self.cfg.network.position_space_height,
-        # )
         
         if weights:
             network.load_state_dict(t.load(weights, weights_only=True))
@@ -177,7 +334,7 @@ class Trainer:
 
         player_1_cards = F.pad(
             player_1_cards,  # (X, card_dim)
-            (0, 0, 0, self.max_num_objects - player_1_num_cards),            # (N, card_dim)
+            (0, 0, 0, self.max_num_objects - player_1_num_cards),  # (N, card_dim)
             "constant", 0
         ).unsqueeze(0)
 
@@ -203,65 +360,24 @@ class Trainer:
         }
 
         return obs_1, obs_2
-    
 
-    def record_episode(self, step, player1_weights=None, player2_weights=None):
-        """Run one greedy episode and save video to self.video_dir."""
 
-        # TODO: move to __init__
-        rec_env = gym.make(self.gym_env_name, render_mode="rgb_array")
-        rec_env = CRFlattenNormWrapper(rec_env)
-        rec_env = gym.wrappers.RecordVideo(
-            rec_env,
-            video_folder=self.video_dir,
-            name_prefix=f"step{step:07d}",
-            episode_trigger=lambda _: True,
-        )
-        
-        net_1, _ = self.get_network_and_optimiser(player1_weights)
-        net_2, _ = self.get_network_and_optimiser(player2_weights)
-        state, _ = rec_env.reset()
-        
-        ep_return = np.zeros(2)
-        try:
-            while True:
-                state_1, state_2  = self.split_observations(state)
-                
-                with t.no_grad():
-                    action_1, _, _, _ = net_1.get_action_and_value(state_1)
-                    action_2, _, _, _ = net_2.get_action_and_value(state_2)
-            
-                action = {
-                    "player_1_skip":          int(action_1["skip"] > 0.5),
-                    "player_1_card_idx":      action_1["deck_idx"],
-                    "player_1_card_position": (
-                        action_1["position"] % self.arena.width,
-                        action_1["position"] // self.arena.height
-                    ),
+    def join_actions(self, action_1, action_2):
+        return {
+            "player_1_skip":     int(action_1["skip"] > 0.5),
+            "player_1_card_idx": action_1["deck_idx"],
+            "player_1_card_position": (
+                action_1["position"] % self.arena.width,
+                action_1["position"] // self.arena.height
+            ),
 
-                    "player_2_skip":          int(action_2["skip"] > 0.5),
-                    "player_2_card_idx":      action_2["deck_idx"],
-                    "player_2_card_position": (
-                        self.arena.width  - action_2["position"] % self.arena.width,
-                        self.arena.height - action_2["position"] // self.arena.height
-                    ),
-                }
-
-                state, reward, terminated, truncated, _ = rec_env.step(action)
-            
-                ep_return += np.array(reward)
-            
-                if terminated or truncated:
-                    break
-
-        except Exception as e:
-            print(e)
-        
-        rec_env.close()
-        
-        print(f"\t [video] step {step}:\t return: {ep_return}")
-        
-        return ep_return
+            "player_2_skip":     int(action_2["skip"] > 0.5),
+            "player_2_card_idx": action_2["deck_idx"],
+            "player_2_card_position": (
+                self.arena.width  - action_2["position"] % self.arena.width,
+                self.arena.height - action_2["position"] // self.arena.height
+            ),
+        }
 
     
     def set_seed(self, seed: int = 42):
