@@ -13,7 +13,7 @@ class PlayerSide:
 
         self.elixirs = 0.0  # init
         self.max_elixirs = 10  # TODO: move this up to arena class, pass as arg
-        self.elixirs_per_sec = 1.0
+        self.elixirs_incriment_cooldown = 5.0
         self._elixir_timer = 0.0
 
         self.objects = set()  # Add towers once initialised
@@ -23,7 +23,7 @@ class PlayerSide:
     def update(self, dt):
         self._elixir_timer += dt
 
-        if self._elixir_timer < self.elixirs_per_sec:
+        if self._elixir_timer < self.elixirs_incriment_cooldown:
             return
 
         self._elixir_timer = 0.0

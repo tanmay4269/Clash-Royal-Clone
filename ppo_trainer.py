@@ -33,11 +33,38 @@ class Trainer:
         self.arena = self.env.env.env.env.arena
         self.max_num_objects = self.arena.max_num_objects
 
-        # 
+        #
+        occupancy_grid = self.arena.cell_occupancy
+        scale = self.arena.tile_size
+
+        tiled_occupancy_grid = (
+            np.where(occupancy_grid == 1, 1, 0)[scale//2::scale, scale//2::scale]
+        )
+
+        invalid_position_mask = tiled_occupancy_grid.astype(bool).T
+        invalid_position_mask[: self.arena.height//2, :] = True
+
+        ### CONFIGS ###
         self.cfg = Dict()
 
         self.cfg.seed = 42
         self.set_seed(self.cfg.seed)
+
+        # Network Config
+        self.cfg.network.entity_encoder_in_ch = self.env.flat_card_space.shape[0]
+        self.cfg.network.entity_encoder_mid_ch = 64
+        self.cfg.network.entity_encoder_out_ch = 32
+
+        self.cfg.network.trunk_extra_in_ch = 2
+        self.cfg.network.trunk_mid_ch = 128
+        
+        self.cfg.network.num_cards_in_deck = self.env.env.env.env.NUM_CARDS_IN_DECK
+        self.cfg.network.max_num_cards = self.max_num_objects
+        self.cfg.network.position_space_width = self.arena.width
+        self.cfg.network.position_space_height = self.arena.height
+
+        self.cfg.network.invalid_position_mask = t.tensor(invalid_position_mask).flatten()
+        # self.cfg.network.invalid_position_mask = None
 
         # Buffer Related
         self.cfg.buffer.n_steps = 2048
@@ -58,22 +85,9 @@ class Trainer:
         self.cfg.k_epochs = 10  # gradient steps per rollout
         self.cfg.max_steps = 100_000_000  # total env steps
 
-        # Network Config
-        self.cfg.network.entity_encoder_in_ch = self.env.flat_card_space.shape[0]
-        self.cfg.network.entity_encoder_mid_ch = 64
-        self.cfg.network.entity_encoder_out_ch = 32
-
-        self.cfg.network.trunk_extra_in_ch = 2
-        self.cfg.network.trunk_mid_ch = 128
-        
-        self.cfg.network.num_cards_in_deck = self.env.env.env.env.NUM_CARDS_IN_DECK
-        self.cfg.network.max_num_cards = self.max_num_objects
-        self.cfg.network.position_space_width = self.arena.width
-        self.cfg.network.position_space_height = self.arena.height
-
         # Replay storing
-        self.video_dir = "./videos"
-        self.video_every = 250_000
+        self.video_dir = "./videos/debug"
+        self.video_every = 5_000
         os.makedirs(self.video_dir, exist_ok=True)
 
         # WANDB logging
@@ -98,7 +112,7 @@ class Trainer:
 
         # * DEBUG *
         net_1, optimiser_1 = self.get_network_and_optimiser()
-        net_2 = deepcopy(net_1)
+        net_2 = net_1
 
         state, _ = self.env.reset()
         state_1, state_2  = self.split_observations(state)
@@ -368,14 +382,14 @@ class Trainer:
             "player_1_card_idx": action_1["deck_idx"],
             "player_1_card_position": (
                 action_1["position"] % self.arena.width,
-                action_1["position"] // self.arena.height
+                action_1["position"] // self.arena.width
             ),
 
             "player_2_skip":     int(action_2["skip"] > 0.5),
             "player_2_card_idx": action_2["deck_idx"],
             "player_2_card_position": (
                 self.arena.width  - action_2["position"] % self.arena.width,
-                self.arena.height - action_2["position"] // self.arena.height
+                self.arena.height - action_2["position"] // self.arena.width
             ),
         }
 

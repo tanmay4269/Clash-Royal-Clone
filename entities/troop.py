@@ -242,12 +242,8 @@ class Troop(Entity):
         SCALE = 16  # Reduction by this much on each axis
 
         # 1 => occupied
-        tiled_occupancy_grid = (
-            np.where(occupancy_grid == 1, 1, 0)
-            .reshape(occupancy_grid.shape[0] // SCALE, SCALE, occupancy_grid.shape[1] // SCALE, SCALE)
-            .transpose(0, 2, 1, 3)
-            .max(axis=(2, 3))
-        )
+        # Sample the center pixel of the tile to avoid walls bleeding into paths
+        tiled_occupancy_grid = (np.where(occupancy_grid == 1, 1, 0)[SCALE//2::SCALE, SCALE//2::SCALE]).astype(int)
 
         start = (int(self.position.x / SCALE), int(self.position.y / SCALE))
         target = (int(self.target.position.x / SCALE), int(self.target.position.y / SCALE))
@@ -299,7 +295,8 @@ class Troop(Entity):
                 r, c = neighbor
                 if not (0 <= r < rows and 0 <= c < cols):
                     continue
-                if grid[r, c] != 0:
+                # Allow stepping onto the goal even if it's "occupied" by a building
+                if grid[r, c] != 0 and neighbor != goal:
                     continue
 
                 # Diagonal moves cost sqrt(2), cardinal cost 1

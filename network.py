@@ -17,12 +17,16 @@ class ActorCritic(nn.Module):
         max_num_cards,
         position_space_width,
         position_space_height,
+
+        invalid_position_mask=None,
     ):
         super().__init__()
 
         self.max_num_cards = max_num_cards
         self.position_space_width  = position_space_width
         self.position_space_height = position_space_height
+        
+        self.invalid_position_mask = invalid_position_mask
 
 
         self.entity_encoder = nn.Sequential(
@@ -133,6 +137,8 @@ class ActorCritic(nn.Module):
             deck_logits = deck_logits.masked_fill(invalid_deck_mask, float('-inf'))
         if invalid_position_mask is not None:
             pos_logits = pos_logits.masked_fill(invalid_position_mask, float('-inf'))
+        if self.invalid_position_mask is not None:
+            pos_logits = pos_logits.masked_fill(self.invalid_position_mask, float('-inf'))
         
         skip_dist = t.distributions.normal.Normal(skip_mu, skip_std)
         deck_dist = t.distributions.Categorical(logits=deck_logits)
