@@ -64,7 +64,6 @@ class Trainer:
         self.cfg.network.position_space_height = self.arena.height
 
         self.cfg.network.invalid_position_mask = t.tensor(invalid_position_mask).flatten()
-        # self.cfg.network.invalid_position_mask = None
 
         # Buffer Related
         self.cfg.buffer.n_steps = 2048
@@ -83,16 +82,16 @@ class Trainer:
         # Misc
         self.cfg.minibatch_size = 128
         self.cfg.k_epochs = 10  # gradient steps per rollout
-        self.cfg.max_steps = 100_000_000  # total env steps
+        self.cfg.max_steps = 1_000_000_000  # total env steps
 
         # Replay storing
-        self.video_dir = "./videos/debug"
-        self.video_every = 5_000
+        self.video_dir = "./videos/try_1"
+        self.video_every = 250_000
         os.makedirs(self.video_dir, exist_ok=True)
 
         # WANDB logging
-        self.wandb_logging = False
-        # self.wandb_logging = True
+        # self.wandb_logging = False
+        self.wandb_logging = True
 
         if self.wandb_logging:
             wandb.init(
@@ -112,7 +111,7 @@ class Trainer:
 
         # * DEBUG *
         net_1, optimiser_1 = self.get_network_and_optimiser()
-        net_2 = net_1
+        net_2 = deepcopy(net_1)
 
         state, _ = self.env.reset()
         state_1, state_2  = self.split_observations(state)
@@ -120,6 +119,8 @@ class Trainer:
         while global_step < self.cfg.max_steps:
             buffer_1 = RolloutBuffer(**self.cfg.buffer.to_dict())
             # buffer_2 = RolloutBuffer(**self.cfg.buffer.to_dict())
+
+            net_2 = deepcopy(net_1)  # updating to latest policy
 
             for _ in range(self.cfg.buffer.n_steps):
                 with t.no_grad():
