@@ -25,6 +25,11 @@ import wandb
 
 class Trainer:
     def __init__(self, gym_env_name):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Using device: {device}")
+        t.set_default_device(device)
+
+
         self.gym_env_name = gym_env_name
 
         self.env = gym.make(self.gym_env_name)
