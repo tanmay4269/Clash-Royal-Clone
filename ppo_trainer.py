@@ -79,7 +79,7 @@ class Trainer:
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         
         self.checkpoint_counter = 0
-        self.cfg.sample_policy_from_latest_k_checkpoints = 10
+        self.cfg.sample_policy_from_latest_k_checkpoints = 100
 
         # PPO Update
         self.cfg.ppo_clip = 0.2
@@ -167,7 +167,7 @@ class Trainer:
                         checkpoint_sample = np.random.randint(checkpoint_min, checkpoint_max)
                         checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_{checkpoint_sample}.pt")
                         net_2.load_state_dict(t.load(checkpoint_path, weights_only=True))
-                        print(f"Loaded opponent policy from checkpoint index {checkpoint_sample}")
+                        print(f"Loaded opponent policy from checkpoint index {checkpoint_sample} at step {global_step}")
 
                     ep_seed = np.random.randint(0, 2**31)
                     state, _ = self.env.reset(seed=ep_seed)
@@ -194,13 +194,13 @@ class Trainer:
                 t.save(net_1.state_dict(), checkpoint_path)
                 print(f"Saved checkpoint number {self.checkpoint_counter} at step {global_step}")
 
-                if self.checkpoint_counter > self.cfg.sample_policy_from_latest_k_checkpoints * 2:
-                    # To prevent too much storage usage, we can start deleting old checkpoints once we have a good number of them
-                    checkpoint_to_delete = self.checkpoint_counter - self.cfg.sample_policy_from_latest_k_checkpoints * 2
+                # To prevent too much storage usage, we can start deleting old checkpoints once we have a good number of them
+                if self.checkpoint_counter >= self.cfg.sample_policy_from_latest_k_checkpoints:
+                    checkpoint_to_delete = self.checkpoint_counter - self.cfg.sample_policy_from_latest_k_checkpoints
                     checkpoint_to_delete_path = os.path.join(self.checkpoint_dir, f"checkpoint_{checkpoint_to_delete}.pt")
                     if os.path.exists(checkpoint_to_delete_path):
                         os.remove(checkpoint_to_delete_path)
-                        print(f"Deleted old checkpoint at index {checkpoint_to_delete}")                
+                        print(f"Deleted old checkpoint at index {checkpoint_to_delete}")
 
                 self.checkpoint_counter += 1
 
