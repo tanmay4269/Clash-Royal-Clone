@@ -97,7 +97,7 @@ class Trainer:
 
         # Replay storing
         self.video_dir = "./videos/try_1"
-        self.video_every = 5_000
+        self.video_every = 10_000
         # self.video_every = 250_000
         os.makedirs(self.video_dir, exist_ok=True)
 
@@ -139,7 +139,13 @@ class Trainer:
                     action_2, _, _, _ = net_2.get_action_and_value(state_2) 
 
                 action = self.join_actions(action_1, action_2)
-                next_state, reward, terminated, truncated, _ = self.env.step(action)
+
+                try:
+                    next_state, reward, terminated, truncated, _ = self.env.step(action)
+                except Exception as e:
+                    print(e)
+                    terminated = True
+
                 done = terminated or truncated
 
                 buffer_1.push(state_1, action_1, log_prob_1, reward[0], value_1, done)
@@ -161,7 +167,7 @@ class Trainer:
                         checkpoint_sample = np.random.randint(checkpoint_min, checkpoint_max)
                         checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_{checkpoint_sample}.pt")
                         net_2.load_state_dict(t.load(checkpoint_path, weights_only=True))
-                        # print(f"Loaded opponent policy from checkpoint index {checkpoint_sample}")
+                        print(f"Loaded opponent policy from checkpoint index {checkpoint_sample}")
 
                     ep_seed = np.random.randint(0, 2**31)
                     state, _ = self.env.reset(seed=ep_seed)
