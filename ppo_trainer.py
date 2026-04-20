@@ -25,9 +25,9 @@ import wandb
 
 class Trainer:
     def __init__(self, gym_env_name):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Using device: {device}")
-        t.set_default_device(device)
+        # device = "cuda" if torch.cuda.is_available() else "cpu"
+        # print(f"Using device: {device}")
+        # t.set_default_device(device)
 
 
         self.gym_env_name = gym_env_name
@@ -42,12 +42,9 @@ class Trainer:
         occupancy_grid = self.arena.cell_occupancy
         scale = self.arena.tile_size
 
-        tiled_occupancy_grid = (
-            np.where(occupancy_grid == 1, 1, 0)[scale//2::scale, scale//2::scale]
-        )
-
+        tiled_occupancy_grid = np.where(occupancy_grid == 1, 1, 0)[scale//2::scale, scale//2::scale]
         invalid_position_mask = tiled_occupancy_grid.astype(bool).T
-        invalid_position_mask[: self.arena.height//2, :] = True
+        invalid_position_mask[: self.arena.height//2, :] = True  # other player's half is always invalid
 
         ### CONFIGS ###
         self.cfg = Dict()
@@ -91,12 +88,13 @@ class Trainer:
 
         # Replay storing
         self.video_dir = "./videos/try_1"
-        self.video_every = 250_000
+        self.video_every = 5_000
+        # self.video_every = 250_000
         os.makedirs(self.video_dir, exist_ok=True)
 
         # WANDB logging
-        # self.wandb_logging = False
-        self.wandb_logging = True
+        self.wandb_logging = False
+        # self.wandb_logging = True
 
         if self.wandb_logging:
             wandb.init(
@@ -288,7 +286,7 @@ class Trainer:
     def get_network_and_optimiser(self, weights=None):
         """
         Self-Play PPO samples from a pool of policies, so the weights arg 
-        inits the network with those STRICTLY
+        inits the network with those
         """
 
         network = ActorCritic(**self.cfg.network.to_dict())
@@ -313,8 +311,8 @@ class Trainer:
             player_2_num_cards = 1
 
         player_1_cards = F.pad(
-            t.tensor(np.array(obs["player_1_cards"])),  # (X, card_dim)
-            (0, 0, 0, self.max_num_objects - player_1_num_cards),            # (N, card_dim)
+            t.tensor(np.array(obs["player_1_cards"])),             # (X, card_dim)
+            (0, 0, 0, self.max_num_objects - player_1_num_cards),  # (N, card_dim)
             "constant", 0
         ).unsqueeze(0)
 

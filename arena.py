@@ -61,8 +61,12 @@ class Arena:
 
 
         self.elapsed_time = 0
-        self.game_duration = 90  # sec
+        self.game_duration = 180  # sec
+
+        self.has_double_elixir_started = False
+        self.double_elixir_start = 90
         
+
         self._font = None
 
         # * DEBUG *
@@ -226,6 +230,11 @@ class Arena:
 
 
         ### Elixir Update ###
+        if not self.has_double_elixir_started and self.elapsed_time > self.double_elixir_start:
+            self.has_double_elixir_started = True
+            self.player_side_1.elixirs_incriment_cooldown /= 2
+            self.player_side_2.elixirs_incriment_cooldown /= 2
+
         self.player_side_1.update(dt)
         self.player_side_2.update(dt)
         

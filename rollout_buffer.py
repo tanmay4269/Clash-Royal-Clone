@@ -116,31 +116,5 @@ class RolloutBuffer:
         return unflattened_dict
 
     
-    # def flatten_state_dict(self, data):
-    #     if self.state_shapes is None:
-    #         self.state_shapes = {
-    #             k: v.shape if isinstance(v, t.Tensor) else None
-    #             for k, v in data.items()
-    #         }
-        
-    #     return t.cat([
-    #         v.flatten() if isinstance(v, t.Tensor) else t.from_numpy(v).flatten()
-    #         for v in data.values()
-    #     ])
-
-    
-    # def flatten_action_dict(self, data):
-    #     if self.action_shapes is None:
-    #         self.action_shapes = {
-    #             k: v.shape if isinstance(v, np.ndarray) else None
-    #             for k, v in data.items()
-    #         }
-
-    #     return t.tensor(np.concatenate([
-    #         v.flatten() if isinstance(v, np.ndarray) else np.array(v).flatten()
-    #         for v in data.values()
-    #     ]))
-
-
     def reset(self):
         self.ptr = 0

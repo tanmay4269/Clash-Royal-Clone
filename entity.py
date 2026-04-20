@@ -102,6 +102,8 @@ class Entity:
 
         self.damage = damage
         self.attack_radius_cells = attack_radius * 16
+
+        self.visibility_cells = 18//3 * 16  # Radius within which this entity can potentially agro on an opponent, else defaults to opponent's towers
         
         self.hit_speed = hit_speed
         self.first_hit_speed = first_hit_speed

@@ -1,5 +1,6 @@
 from utils import *
 from entity import Entity
+from entities.buildings.crown_tower import CrownTower
 
 import heapq
 from collections import deque
@@ -74,7 +75,7 @@ class Troop(Entity):
         for r in range(int(self.size * 2)):
             for c in range(int(self.size * 2)):
                 if (r - self.size) ** 2 + (c - self.size) ** 2 < self.size ** 3:
-                    self.cell_occupancy[r, c] = True
+                    self.cell_occupancy[r, c] = 1
 
 
     def render(self, screen, color) -> None:
@@ -114,6 +115,9 @@ class Troop(Entity):
         if True:
             # Attack radius
             pygame.draw.circle(screen, "black", self.position, self.attack_radius_cells, width=1)
+            
+            # Visibility radius
+            # pygame.draw.circle(screen, "brown", self.position, self.visibility_cells, width=1)
 
             # Waypoints
             for i in range(len(self.waypoints)-1):
@@ -217,7 +221,11 @@ class Troop(Entity):
         for obj in self.owner.opponent.objects:
             if obj.entity_type not in self.target_types:
                 continue
+
             dist = (self.position - obj.position).length()
+
+            if not isinstance(obj, CrownTower) and dist > self.visibility_cells:
+                continue
 
             if dist < closest_dist:
                 closest_obj = obj
