@@ -157,6 +157,7 @@ class Trainer:
                 ep_return += np.array(reward)
 
                 if done:
+                    wandb.log({"episode_return": ep_return[0]}, step=global_step)
                     ep_returns.append(ep_return)
                     ep_return = np.zeros(2)
 
@@ -218,7 +219,6 @@ class Trainer:
 
             if self.wandb_logging:
                 wandb.log({
-                    "avg_100":        avg_100_player_1,
                     "actor_loss":     actor_loss,
                     "critic_loss":    critic_loss,
                     "entropy":        entropy,
