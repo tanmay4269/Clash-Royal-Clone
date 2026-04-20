@@ -79,7 +79,7 @@ class Trainer:
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         
         self.checkpoint_counter = 0
-        self.cfg.sample_policy_from_latest_k_checkpoints = 100
+        self.cfg.sample_policy_from_latest_k_checkpoints = 10
 
         # PPO Update
         self.cfg.ppo_clip = 0.2
