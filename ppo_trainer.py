@@ -102,8 +102,8 @@ class Trainer:
         os.makedirs(self.video_dir, exist_ok=True)
 
         # WANDB logging
-        self.wandb_logging = False
-        # self.wandb_logging = True
+        # self.wandb_logging = False
+        self.wandb_logging = True
 
         if self.wandb_logging:
             wandb.init(
@@ -267,6 +267,11 @@ class Trainer:
         
         print(f"\t [video] step {step}:\t return: {ep_return}")
         
+        if self.wandb_logging:
+            video_path = os.path.join(self.video_dir, f"step{step:07d}-episode-0.mp4")
+            if os.path.exists(video_path):
+                wandb.log({"video": wandb.Video(video_path, format="mp4")}, step=step)
+
         return ep_return
 
     
