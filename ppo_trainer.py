@@ -68,9 +68,18 @@ class Trainer:
         self.cfg.network.invalid_position_mask = t.tensor(invalid_position_mask).flatten()
 
         # Buffer Related
-        self.cfg.buffer.n_steps = 2048
+        self.cfg.buffer.n_steps = 2048  # Each game is duration * 1/fps steps long, need to check how many games in a buffer is a sweet spot
         self.cfg.buffer.gae_gamma = 0.99
         self.cfg.buffer.gae_lambda = 0.95
+
+        # Player Pool
+        self.cfg.checkpoint_every_k_ppo_updates = 5
+        
+        self.checkpoint_dir = "./checkpoints"
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        
+        self.checkpoint_counter = 0
+        self.cfg.sample_policy_from_latest_k_checkpoints = 100
 
         # PPO Update
         self.cfg.ppo_clip = 0.2
@@ -123,8 +132,6 @@ class Trainer:
             buffer_1 = RolloutBuffer(**self.cfg.buffer.to_dict())
             # buffer_2 = RolloutBuffer(**self.cfg.buffer.to_dict())
 
-            net_2 = deepcopy(net_1)  # updating to latest policy
-
             for _ in range(self.cfg.buffer.n_steps):
                 with t.no_grad():
                     action_1, log_prob_1, entropy_1, value_1 = net_1.get_action_and_value(state_1)
@@ -147,6 +154,15 @@ class Trainer:
                     ep_returns.append(ep_return)
                     ep_return = np.zeros(2)
 
+                    # Change the opponent policy
+                    checkpoint_min = max(0, self.checkpoint_counter - self.cfg.sample_policy_from_latest_k_checkpoints)
+                    checkpoint_max = self.checkpoint_counter - 1
+                    if checkpoint_max > checkpoint_min:
+                        checkpoint_sample = np.random.randint(checkpoint_min, checkpoint_max)
+                        checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_{checkpoint_sample}.pt")
+                        net_2.load_state_dict(t.load(checkpoint_path, weights_only=True))
+                        # print(f"Loaded opponent policy from checkpoint index {checkpoint_sample}")
+
                     ep_seed = np.random.randint(0, 2**31)
                     state, _ = self.env.reset(seed=ep_seed)
                     state_1, state_2  = self.split_observations(state)
@@ -165,6 +181,23 @@ class Trainer:
 
             # PPO update
             actor_loss, critic_loss, entropy, ratio_mean, advantage_mean = self.ppo_update(buffer_1, net_1, optimiser_1)
+            
+            # Checkpointing
+            if global_step % self.cfg.buffer.n_steps * self.cfg.checkpoint_every_k_ppo_updates == 0:
+                checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_{self.checkpoint_counter}.pt")
+                t.save(net_1.state_dict(), checkpoint_path)
+                print(f"Saved checkpoint number {self.checkpoint_counter} at step {global_step}")
+
+                if self.checkpoint_counter > self.cfg.sample_policy_from_latest_k_checkpoints * 2:
+                    # To prevent too much storage usage, we can start deleting old checkpoints once we have a good number of them
+                    checkpoint_to_delete = self.checkpoint_counter - self.cfg.sample_policy_from_latest_k_checkpoints * 2
+                    checkpoint_to_delete_path = os.path.join(self.checkpoint_dir, f"checkpoint_{checkpoint_to_delete}.pt")
+                    if os.path.exists(checkpoint_to_delete_path):
+                        os.remove(checkpoint_to_delete_path)
+                        print(f"Deleted old checkpoint at index {checkpoint_to_delete}")                
+
+                self.checkpoint_counter += 1
+
 
             buffer_1.reset()
             # buffer_2.reset()
@@ -173,7 +206,7 @@ class Trainer:
             avg_100_player_1 = avg_100[0]
 
             print(
-                f"step {global_step:7d} | avg(last 100 eps): {avg_100_player_1} | "
+                f"step {global_step:7d} | avg(last 100 eps): {avg_100_player_1:10.3f} | "
                 f"actor_loss: {actor_loss:7.3f} | critic_loss: {critic_loss:7.3f} | entropy: {entropy:.3f}"
             )
 
@@ -198,6 +231,7 @@ class Trainer:
             video_folder=self.video_dir,
             name_prefix=f"step{step:07d}",
             episode_trigger=lambda _: True,
+            disable_logger=True,
         )
         
         state, _ = rec_env.reset()

@@ -321,4 +321,3 @@ class Arena:
         ] = mask
 
         return True
-

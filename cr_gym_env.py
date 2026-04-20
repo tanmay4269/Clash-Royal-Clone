@@ -29,8 +29,8 @@ class ClashRoyaleEnv(gym.Env):
 
         def get_entity_space():
             return spaces.Dict({
-                "deploy_cost": spaces.Box(0.0, self.arena.player_side_1.max_elixirs),
-                "deploy_delay": spaces.Box(0.0, 10.0),
+                "deploy_cost": spaces.Box(0.0, self.arena.player_side_1.max_elixirs, shape=(1,), dtype=np.float32),
+                "deploy_delay": spaces.Box(0.0, 10.0, shape=(1,), dtype=np.float32),
                 
                 "entity_type": spaces.Discrete(EntityType.num_types()), 
 
@@ -38,22 +38,23 @@ class ClashRoyaleEnv(gym.Env):
 
                 # x, y
                 "position": spaces.Box(  
-                    low=np.array([0.0, 0.0]),
+                    low=np.array([0.0, 0.0], dtype=np.float32),
                     high=np.array([
                         self.arena.width * self.arena.tile_size,
                         self.arena.height * self.arena.tile_size
-                    ])
+                    ], dtype=np.float32),
+                    dtype=np.float32
                 ),
                 
                 # "health": spaces.Box(0.0, FLOAT_MAX),
-                "health": spaces.Box(0.0, EntityRegistry.aggregate("health")["max"]),
-                "hitpoints": spaces.Box(0.0, EntityRegistry.aggregate("hitpoints")["max"]),
+                "health": spaces.Box(0.0, EntityRegistry.aggregate("health")["max"], shape=(1,), dtype=np.float32),
+                "hitpoints": spaces.Box(0.0, EntityRegistry.aggregate("hitpoints")["max"], shape=(1,), dtype=np.float32),
 
-                "damage": spaces.Box(0.0, EntityRegistry.aggregate("damage")["max"]),
-                "attack_radius_cells": spaces.Box(0.0, EntityRegistry.aggregate("attack_radius_cells")["max"]),
+                "damage": spaces.Box(0.0, EntityRegistry.aggregate("damage")["max"], shape=(1,), dtype=np.float32),
+                "attack_radius_cells": spaces.Box(0.0, EntityRegistry.aggregate("attack_radius_cells")["max"], shape=(1,), dtype=np.float32),
 
-                "hit_speed": spaces.Box(0.0, EntityRegistry.aggregate("hit_speed")["max"]),
-                "first_hit_speed": spaces.Box(0.0, EntityRegistry.aggregate("first_hit_speed")["max"]),
+                "hit_speed": spaces.Box(0.0, EntityRegistry.aggregate("hit_speed")["max"], shape=(1,), dtype=np.float32),
+                "first_hit_speed": spaces.Box(0.0, EntityRegistry.aggregate("first_hit_speed")["max"], shape=(1,), dtype=np.float32),
                 
                 # Maybe add what stage of its hit cycle is it if the model can't seem to figure this out
             })
@@ -65,7 +66,7 @@ class ClashRoyaleEnv(gym.Env):
         })
 
         self.observation_space = spaces.Dict({
-            "game_completion_fraction": spaces.Box(0.0, 1.0),
+            "game_completion_fraction": spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32),
             "player_1_elixirs": spaces.Discrete(self.arena.player_side_1.max_elixirs + 1),
             "player_1_cards": spaces.Sequence(get_entity_space()),
             "player_1_crown_towers": crown_towers_space,
@@ -112,10 +113,10 @@ class ClashRoyaleEnv(gym.Env):
         obs = {}
 
         ### Basics ###
-        obs["game_completion_fraction"] = self.arena.elapsed_time / self.arena.game_duration
+        obs["game_completion_fraction"] = np.array([self.arena.elapsed_time / self.arena.game_duration], dtype=np.float32)
 
-        obs["player_1_elixirs"] = int(self.arena.player_side_1.elixirs)
-        obs["player_2_elixirs"] = int(self.arena.player_side_2.elixirs)
+        obs["player_1_elixirs"] = np.int64(self.arena.player_side_1.elixirs)
+        obs["player_2_elixirs"] = np.int64(self.arena.player_side_2.elixirs)
 
         ### Cards ###
         obs["player_1_cards"], obs["player_2_cards"] = [], []
@@ -125,8 +126,8 @@ class ClashRoyaleEnv(gym.Env):
             
             owner = obs["player_1_cards"] if obj.owner == self.arena.player_side_1 else obs["player_2_cards"]
             owner.append({
-                "deploy_cost": obj.deploy_cost,
-                "deploy_delay": obj.deploy_delay,
+                "deploy_cost": np.array([obj.deploy_cost], dtype=np.float32),
+                "deploy_delay": np.array([obj.deploy_delay], dtype=np.float32),
 
                 "entity_type": obj.entity_type,
                 "target_types": np.array([
@@ -135,16 +136,16 @@ class ClashRoyaleEnv(gym.Env):
                     int(EntityType.BUILDING in obj.target_types),
                 ], dtype=np.int8),
 
-                "position": np.array([obj.position.x, obj.position.y]),
+                "position": np.array([obj.position.x, obj.position.y], dtype=np.float32),
                 
-                "health": obj.health,
-                "hitpoints": obj.hitpoints,
+                "health": np.array([obj.health], dtype=np.float32),
+                "hitpoints": np.array([obj.hitpoints], dtype=np.float32),
                 
-                "damage": obj.damage,
-                "attack_radius_cells": obj.attack_radius_cells,
+                "damage": np.array([obj.damage], dtype=np.float32),
+                "attack_radius_cells": np.array([obj.attack_radius_cells], dtype=np.float32),
 
-                "hit_speed": obj.hit_speed,
-                "first_hit_speed": obj.first_hit_speed,
+                "hit_speed": np.array([obj.hit_speed], dtype=np.float32),
+                "first_hit_speed": np.array([obj.first_hit_speed], dtype=np.float32),
             })
 
 
@@ -203,6 +204,8 @@ class ClashRoyaleEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
+
+        self.arena = Arena()
 
         self._cur_obs = self._get_obs()
         info = self._get_info()
