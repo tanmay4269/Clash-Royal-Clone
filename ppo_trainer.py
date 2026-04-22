@@ -47,6 +47,9 @@ class Trainer:
         self.gym_env_name = gym_env_name
 
         self.env = gym.make(self.gym_env_name)
+        # self.num_envs = 4
+        # self.env = gym.vector.make(self.gym_env_name, num_envs=self.num_envs, asynchronous=True)
+
         self.env = CRFlattenNormWrapper(self.env)
 
         self.arena = self.env.unwrapped.arena
@@ -185,7 +188,14 @@ class Trainer:
 
                 done = terminated or truncated
 
-                buffer.push(state_1, action_1, log_prob_1, reward[0], value_1, done)
+                # buffer.push(state_1, action_1, log_prob_1, reward[0], value_1, done)
+                buffer.push(state_1, action_1, log_prob_1, reward[0], value_1, terminated)
+                """
+                If a game ends simply because time ran out (truncated), GAE will set (1 - next_done) to 0. 
+                This incorrectly forces the value of the final state to 0, making the critic think running out 
+                of time violently acts as a massive negative return drop.
+                Solution: PPO should only mask out values if the agent actually "dies" or the game ends artificially.
+                """
 
                 state = next_state
                 state_1, state_2  = self.split_observations(state)
@@ -233,7 +243,8 @@ class Trainer:
             # Bootstrap final value and compute GAE
             with t.no_grad():
                 _, _, _, last_value_1 = net_1.get_action_and_value(state_1)
-                buffer.compute_gae(last_value_1, done)
+                # buffer.compute_gae(last_value_1, done)
+                buffer.compute_gae(last_value_1, terminated)
 
             # PPO update
             if os.environ.get("PROFILE_MODE"):
@@ -290,8 +301,8 @@ class Trainer:
                 # Critic Loss
                 G = returns
                 V = values
-                # critic_loss = ( (G - V) ** 2 ).mean()
-                critic_loss = F.smooth_l1_loss(input=V, target=G)
+                critic_loss = ( (G - V) ** 2 ).mean()
+                # critic_loss = F.smooth_l1_loss(input=V, target=G)
 
                 # Backprop
                 loss = actor_loss + self.cfg.critic_loss_coef * critic_loss - self.entropy_loss_coef * entropies.mean()
@@ -401,20 +412,23 @@ class Trainer:
         player_2_num_cards = len(obs["player_2_cards"])
 
         if player_1_num_cards == 0:
-            obs["player_1_cards"] = [np.zeros(self.env.flat_card_space.shape)]
-            player_1_num_cards = 1
+            player_1_cards_arr = np.zeros((0, self.env.flat_card_space.shape[0]), dtype=np.float32)
+        else:
+            player_1_cards_arr = np.array(obs["player_1_cards"], dtype=np.float32)
+            
         if player_2_num_cards == 0:
-            obs["player_2_cards"] = [np.zeros(self.env.flat_card_space.shape)]
-            player_2_num_cards = 1
+            player_2_cards_arr = np.zeros((0, self.env.flat_card_space.shape[0]), dtype=np.float32)
+        else:
+            player_2_cards_arr = np.array(obs["player_2_cards"], dtype=np.float32)
 
         player_1_cards = F.pad(
-            t.tensor(np.array(obs["player_1_cards"], dtype=np.float32)),  # (X, card_dim)
+            t.tensor(player_1_cards_arr),  # (X, card_dim)
             (0, 0, 0, self.max_num_objects - player_1_num_cards),         # (N, card_dim)
             "constant", 0
         ).unsqueeze(0)
 
         player_2_cards = F.pad(
-            t.tensor(np.array(obs["player_2_cards"], dtype=np.float32)),
+            t.tensor(player_2_cards_arr),
             (0, 0, 0, self.max_num_objects - player_2_num_cards),
             "constant", 0
         ).unsqueeze(0)
@@ -438,8 +452,8 @@ class Trainer:
         position_x_idx, position_y_idx = np.arange(*self.env.flattened_card_space_indices["position"])
         
         # Doing this to prevent zero padded entries to falsely invert
-        player_1_cards = t.tensor(np.array(obs["player_1_cards"], dtype=np.float32))
-        player_2_cards = t.tensor(np.array(obs["player_2_cards"], dtype=np.float32))
+        player_1_cards = t.tensor(player_1_cards_arr)
+        player_2_cards = t.tensor(player_2_cards_arr)
 
         player_1_cards[..., position_x_idx] = width_cell  - player_1_cards[..., position_x_idx]
         player_1_cards[..., position_y_idx] = height_cell - player_1_cards[..., position_y_idx]
@@ -479,14 +493,14 @@ class Trainer:
 
     def join_actions(self, action_1, action_2):
         return {
-            "player_1_skip":     int(action_1["skip"] > 0.5),
+            "player_1_skip":     action_1["skip"],
             "player_1_card_idx": action_1["deck_idx"],
             "player_1_card_position": (
                 action_1["position"] % self.arena.width,
                 action_1["position"] // self.arena.width
             ),
 
-            "player_2_skip":     int(action_2["skip"] > 0.5),
+            "player_2_skip":     action_2["skip"],
             "player_2_card_idx": action_2["deck_idx"],
             "player_2_card_position": (
                 self.arena.width  - action_2["position"] % self.arena.width,

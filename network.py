@@ -55,10 +55,9 @@ class ActorCritic(nn.Module):
             nn.Linear(trunk_mid_ch, 1)
         )
 
-        self.actor_skip_mu = nn.Sequential(
+        self.actor_skip_net = nn.Sequential(
             nn.Linear(trunk_mid_ch, 1)
         )
-        self.actor_skip_log_std = nn.Parameter(t.zeros(1))
 
         self.actor_deck_idx_net = nn.Sequential(
             nn.Linear(trunk_mid_ch, num_cards_in_deck)
@@ -110,13 +109,11 @@ class ActorCritic(nn.Module):
 
         value = self.critic(trunk_out).squeeze(-1)  # (B,)
 
-        skip_mu = self.actor_skip_mu(trunk_out)
-        skip_std = self.actor_skip_log_std.clamp(-20, 2).exp().expand_as(skip_mu)
-
+        skip_logits = self.actor_skip_net(trunk_out).squeeze(-1)  # (B,)
         deck_logits = self.actor_deck_idx_net(trunk_out)
         pos_logits = self.actor_position_net(trunk_out)
         
-        return value, skip_mu, skip_std, deck_logits, pos_logits
+        return value, skip_logits, deck_logits, pos_logits
 
 
     def get_action_and_value(
@@ -131,7 +128,7 @@ class ActorCritic(nn.Module):
         invalid_deck_mask: based on elixir or something more realistic like CR's random sampling in the deck
         invalid_position_mask: just your half of the arena is deployable into
         """
-        value, skip_mu, skip_std, deck_logits, pos_logits = self(obs)
+        value, skip_logits, deck_logits, pos_logits = self(obs)
 
         if invalid_deck_mask is not None:
             deck_logits = deck_logits.masked_fill(invalid_deck_mask, float('-inf'))
@@ -140,13 +137,12 @@ class ActorCritic(nn.Module):
         if self.invalid_position_mask is not None:
             pos_logits = pos_logits.masked_fill(self.invalid_position_mask, float('-inf'))
         
-        skip_dist = t.distributions.normal.Normal(skip_mu, skip_std)
+        skip_dist = t.distributions.Bernoulli(logits=skip_logits)
         deck_dist = t.distributions.Categorical(logits=deck_logits)
         pos_dist  = t.distributions.Categorical(logits=pos_logits)
 
         if action is None:
-            skip_u      = skip_dist.rsample()
-            action_skip = t.sigmoid(skip_u)
+            action_skip = skip_dist.sample()
             action_deck = deck_dist.sample()
             action_pos  = pos_dist.sample()
         else:
@@ -154,20 +150,15 @@ class ActorCritic(nn.Module):
             action_deck = action["deck_idx"]
             action_pos  = action["position"]
 
-            skip_u = t.log(action_skip / (1 - action_skip + 1e-6))
-
         # Log Probs
-        skip_log_prob = (
-            skip_dist.log_prob(skip_u)
-            - t.log(action_skip * (1 - action_skip) + 1e-6)
-        ).sum(dim=-1)
+        skip_log_prob = skip_dist.log_prob(action_skip)
         deck_log_prob = deck_dist.log_prob(action_deck)
         pos_log_prob  = pos_dist.log_prob(action_pos)
 
         log_prob = skip_log_prob + deck_log_prob + pos_log_prob
 
         # Entropy
-        skip_entropy = skip_dist.entropy().sum(dim=-1)  # Approximate, ignores Jacobian coz that has no closed form hence MC is only way to compute it. But that can make this estimaate have a high variance => instability I dont wanna deal with
+        skip_entropy = skip_dist.entropy()
         deck_entropy = deck_dist.entropy()
         pos_entropy  = pos_dist.entropy()
 

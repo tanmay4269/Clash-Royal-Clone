@@ -286,7 +286,7 @@ class ClashRoyaleEnv(gym.Env):
                     player_1_reward -= delta
                     player_2_reward += delta
 
-        return player_1_reward, player_2_reward
+        return player_1_reward / 1_000.0, player_2_reward / 1_000.0
 
 
     def render(self):
