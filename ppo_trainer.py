@@ -1,4 +1,5 @@
 import os
+import time
 from copy import deepcopy
 
 import random
@@ -26,9 +27,18 @@ import wandb
 
 class Trainer:
     def __init__(self, gym_env_name):
-        # device = "cuda" if torch.cuda.is_available() else "cpu"
-        # print(f"Using device: {device}")
-        # t.set_default_device(device)
+        t.set_default_dtype(t.float32)
+
+        if t.backends.mps.is_available():
+            device = t.device("mps")
+        elif t.cuda.is_available():
+            device = t.device("cuda")
+        else:
+            device = t.device("cpu")
+
+        print(f"Using device: {device}")
+
+        t.set_default_device(device)
 
 
         self.gym_env_name = gym_env_name
@@ -36,7 +46,8 @@ class Trainer:
         self.env = gym.make(self.gym_env_name)
         self.env = CRFlattenNormWrapper(self.env)
 
-        self.arena = self.env.env.env.env.arena  # TODO: do this better
+        # self.arena = self.env.env.env.env.arena  # TODO: do this better
+        self.arena = self.env.unwrapped.arena
         self.max_num_objects = self.arena.max_num_objects
 
         #
@@ -61,7 +72,8 @@ class Trainer:
         self.cfg.network.trunk_extra_in_ch = 2
         self.cfg.network.trunk_mid_ch = 128
         
-        self.cfg.network.num_cards_in_deck = self.env.env.env.env.NUM_CARDS_IN_DECK  # TODO: do this better
+        # self.cfg.network.num_cards_in_deck = self.env.env.env.env.NUM_CARDS_IN_DECK  # TODO: do this better
+        self.cfg.network.num_cards_in_deck = self.env.unwrapped.NUM_CARDS_IN_DECK
         self.cfg.network.max_num_cards = self.max_num_objects
         self.cfg.network.position_space_width = self.arena.width
         self.cfg.network.position_space_height = self.arena.height
@@ -69,9 +81,13 @@ class Trainer:
         self.cfg.network.invalid_position_mask = t.tensor(invalid_position_mask).flatten()
 
         # Buffer Related
-        self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.env.env.env.FIXED_DT * 20)  # Usually 10 to 100 episodes
         self.cfg.buffer.gae_gamma = 0.99
         self.cfg.buffer.gae_lambda = 0.95
+
+        # self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.env.env.env.FIXED_DT * 20)  # Usually 10 to 100 episodes
+        self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.unwrapped.FIXED_DT * 20)  # Usually 10 to 100 episodes
+        if os.environ.get("DEBUG_MODE", None):
+            self.cfg.buffer.n_steps = 2048
 
         # Elo Rating
         self.cfg.elo.initial_rating = 1200
@@ -174,12 +190,14 @@ class Trainer:
                 ep_return += np.array(reward)
 
                 if done:
+                    # TODO: get this from the env instead
                     score = 0
                     if ep_return[0] > ep_return[1]:
                         score = 1
                     elif ep_return[0] == ep_return[1]:
                         score = 0.5
 
+                    # ELO update
                     E_A = 1 / (1 + 10 ** ((opponent_elo - self.current_elo) / self.cfg.elo.scale))
                     self.current_elo = self.current_elo + self.cfg.elo.k_factor * (score - E_A)
 
@@ -215,8 +233,15 @@ class Trainer:
                 buffer.compute_gae(last_value_1, done)
 
             # PPO update
+            if os.environ["PROFILE_MODE"]:
+                ppo_update_start_time = time.time()
+            
             actor_loss, critic_loss, entropy, ratio_mean, advantage_mean = self.ppo_update(buffer, net_1, optimiser_1)
             
+            if os.environ["PROFILE_MODE"]:
+                ppo_update_end_time = time.time()
+                print(f"\t PPO update time: {ppo_update_end_time - ppo_update_start_time:.3f} seconds")
+
             buffer.reset()
 
             avg_100 = np.mean(ep_returns[-100:], axis=0)
@@ -306,6 +331,9 @@ class Trainer:
         state, _ = rec_env.reset()
         ep_return = np.zeros(2)
 
+        if os.environ["PROFILE_MODE"]:
+            env_step_times = []
+
         try:
             while True:
                 state_1, state_2  = self.split_observations(state)
@@ -316,10 +344,18 @@ class Trainer:
             
                 action = self.join_actions(action_1, action_2)
 
+
+                if os.environ["PROFILE_MODE"]:
+                    env_step_start_time = time.time()
+                
                 state, reward, terminated, truncated, _ = rec_env.step(action)
+                
+                if os.environ["PROFILE_MODE"]:
+                    env_step_end_time = time.time()
+                    env_step_times.append(env_step_end_time - env_step_start_time)
             
                 ep_return += np.array(reward)
-            
+
                 if terminated or truncated:
                     break
 
@@ -327,6 +363,9 @@ class Trainer:
             print(e)
         
         rec_env.close()
+
+        if os.environ["PROFILE_MODE"]:
+            print(f"\t [video] Average env step time: {np.mean(env_step_times):.3f} seconds")
         
         print(f"\t [video] step {step}:\t return: {ep_return}")
         
@@ -366,23 +405,23 @@ class Trainer:
             player_2_num_cards = 1
 
         player_1_cards = F.pad(
-            t.tensor(np.array(obs["player_1_cards"])),             # (X, card_dim)
-            (0, 0, 0, self.max_num_objects - player_1_num_cards),  # (N, card_dim)
+            t.tensor(np.array(obs["player_1_cards"], dtype=np.float32)),  # (X, card_dim)
+            (0, 0, 0, self.max_num_objects - player_1_num_cards),         # (N, card_dim)
             "constant", 0
         ).unsqueeze(0)
 
         player_2_cards = F.pad(
-            t.tensor(np.array(obs["player_2_cards"])),
+            t.tensor(np.array(obs["player_2_cards"], dtype=np.float32)),
             (0, 0, 0, self.max_num_objects - player_2_num_cards),
             "constant", 0
         ).unsqueeze(0)
 
-        player_1_crown_towers = t.tensor(np.array(obs["player_1_crown_towers"])).unsqueeze(0)
-        player_2_crown_towers = t.tensor(np.array(obs["player_2_crown_towers"])).unsqueeze(0)
+        player_1_crown_towers = t.tensor(np.array(obs["player_1_crown_towers"], dtype=np.float32)).unsqueeze(0)
+        player_2_crown_towers = t.tensor(np.array(obs["player_2_crown_towers"], dtype=np.float32)).unsqueeze(0)
 
         obs_1 = {
-            "game_completion_fraction": t.tensor(np.array(obs["game_completion_fraction"])).reshape(-1, 1),
-            "elixirs":                  t.tensor(np.array(obs["player_1_elixirs"])).reshape(-1, 1),
+            "game_completion_fraction": t.tensor(np.array(obs["game_completion_fraction"], dtype=np.float32)).reshape(-1, 1),
+            "elixirs":                  t.tensor(np.array(obs["player_1_elixirs"], dtype=np.float32)).reshape(-1, 1),
             "my_cards":                 player_1_cards,
             "opponent_cards":           player_2_cards,
             "my_crown_towers":          player_1_crown_towers,
@@ -396,8 +435,8 @@ class Trainer:
         position_x_idx, position_y_idx = np.arange(*self.env.flattened_card_space_indices["position"])
         
         # Doing this to prevent zero padded entries to falsely invert
-        player_1_cards = t.tensor(np.array(obs["player_1_cards"]))
-        player_2_cards = t.tensor(np.array(obs["player_2_cards"]))
+        player_1_cards = t.tensor(np.array(obs["player_1_cards"], dtype=np.float32))
+        player_2_cards = t.tensor(np.array(obs["player_2_cards"], dtype=np.float32))
 
         player_1_cards[..., position_x_idx] = width_cell  - player_1_cards[..., position_x_idx]
         player_1_cards[..., position_y_idx] = height_cell - player_1_cards[..., position_y_idx]
@@ -424,8 +463,8 @@ class Trainer:
         player_2_crown_towers[..., position_y_idx] = height_cell - player_2_crown_towers[..., position_y_idx]
 
         obs_2 = {
-            "game_completion_fraction": t.tensor(np.array(obs["game_completion_fraction"])).reshape(-1, 1),
-            "elixirs":                  t.tensor(np.array(obs["player_2_elixirs"])).reshape(-1, 1),
+            "game_completion_fraction": t.tensor(np.array(obs["game_completion_fraction"], dtype=np.float32)).reshape(-1, 1),
+            "elixirs":                  t.tensor(np.array(obs["player_2_elixirs"], dtype=np.float32)).reshape(-1, 1),
             "my_cards":                 player_2_cards,
             "opponent_cards":           player_1_cards,
             "my_crown_towers":          player_2_crown_towers,
