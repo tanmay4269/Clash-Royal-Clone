@@ -108,7 +108,7 @@ class Trainer:
 
         self.checkpoint_manager = AdvancedEloBased_CheckpointManagement(
             checkpoint_dir="./checkpoints",
-            elo_cfg=self.cfg.elo.to_dict(),
+            elo_cfg=self.cfg.elo,
             loading_latest_ratio=0.5,
             min_games_before_checkpointing=100,
             score_queue_size=100,
@@ -158,7 +158,7 @@ class Trainer:
         ep_returns = []
 
         global_step = 0
-        next_video = 0
+        next_video = self.video_every_k_global_steps
 
         net_1, optimiser_1 = self.get_network_and_optimiser()
         net_2 = deepcopy(net_1)

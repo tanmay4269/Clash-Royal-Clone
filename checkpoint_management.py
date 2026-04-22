@@ -1,5 +1,6 @@
 import os
 from collections import deque
+import addict
 
 import numpy as np
 import torch as t
@@ -185,7 +186,7 @@ class AdvancedEloBased_CheckpointManagement:
         current_elo = int(current_elo)
         
         if self.checkpoint_counter == 0:
-            return self.elo_cfg.initial_elo
+            return self.elo_cfg.initial_rating
 
         if np.random.rand() < self.loading_latest_ratio:
             checkpoint_sample = self.checkpoint_counter - 1
