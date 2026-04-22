@@ -24,14 +24,16 @@ from checkpoint_management import *
 
 import wandb
 
+# TODO: fix code later
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="gymnasium")
+
 
 class Trainer:
     def __init__(self, gym_env_name):
         t.set_default_dtype(t.float32)
 
-        if t.backends.mps.is_available():
-            device = t.device("mps")
-        elif t.cuda.is_available():
+        if t.cuda.is_available():
             device = t.device("cuda")
         else:
             device = t.device("cpu")
@@ -130,7 +132,7 @@ class Trainer:
         self.cfg.max_steps = 1_000_000_000  # total env steps
 
         # Replay storing
-        self.video_dir = "./videos/try_1"
+        self.video_dir = "./videos/try_4"
         self.video_every = 250_000
         if os.environ.get("DEBUG_MODE", None):
             self.video_every = 5_000
