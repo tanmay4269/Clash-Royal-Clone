@@ -49,7 +49,6 @@ class Trainer:
         self.env = gym.make(self.gym_env_name)
         self.env = CRFlattenNormWrapper(self.env)
 
-        # self.arena = self.env.env.env.env.arena  # TODO: do this better
         self.arena = self.env.unwrapped.arena
         self.max_num_objects = self.arena.max_num_objects
 
@@ -75,7 +74,6 @@ class Trainer:
         self.cfg.network.trunk_extra_in_ch = 2
         self.cfg.network.trunk_mid_ch = 128
         
-        # self.cfg.network.num_cards_in_deck = self.env.env.env.env.NUM_CARDS_IN_DECK  # TODO: do this better
         self.cfg.network.num_cards_in_deck = self.env.unwrapped.NUM_CARDS_IN_DECK
         self.cfg.network.max_num_cards = self.max_num_objects
         self.cfg.network.position_space_width = self.arena.width
@@ -87,9 +85,8 @@ class Trainer:
         self.cfg.buffer.gae_gamma = 0.99
         self.cfg.buffer.gae_lambda = 0.95
 
-        # self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.env.env.env.FIXED_DT * 20)  # Usually 10 to 100 episodes
-        self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.unwrapped.FIXED_DT * 20)  # Usually 10 to 100 episodes
-        if os.environ.get("DEBUG_MODE", None):
+        self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.unwrapped.FIXED_DT * 10)  # Usually 10 to 100 episodes
+        if os.environ.get("DEBUG_MODE"):
             self.cfg.buffer.n_steps = 2048
 
         # Elo Rating
@@ -123,13 +120,13 @@ class Trainer:
         self.cfg.grad_clip = 0.5
 
         # Loss
-        self.cfg.lr = 3e-4 
+        self.cfg.lr = 3e-4 * 4  # sqrt n law
         self.cfg.critic_loss_coef = 0.5
-        self.entropy_loss_coef = 0.05
+        self.entropy_loss_coef = 0.01
 
         # Misc
         self.cfg.minibatch_size = 2048
-        if os.environ.get("DEBUG_MODE", None):
+        if os.environ.get("DEBUG_MODE"):
             self.cfg.minibatch_size = 128
 
         self.cfg.k_epochs = 3  # gradient steps per rollout
@@ -137,14 +134,14 @@ class Trainer:
 
         # Replay storing
         self.video_dir = "./videos/try_4"
-        self.video_every = 250_000
-        if os.environ.get("DEBUG_MODE", None):
-            self.video_every = 5_000
+        self.video_every_k_global_steps = 20_000
+        if os.environ.get("DEBUG_MODE"):
+            self.video_every_k_global_steps = 5_000
         os.makedirs(self.video_dir, exist_ok=True)
 
         # WANDB logging
         self.wandb_logging = True
-        if os.environ.get("DEBUG_MODE", None):
+        if os.environ.get("DEBUG_MODE"):
             self.wandb_logging = False
 
         if self.wandb_logging:
@@ -231,7 +228,7 @@ class Trainer:
 
                 if global_step >= next_video:
                     self.record_episode(global_step, net_1, net_2)
-                    next_video += self.video_every
+                    next_video += self.video_every_k_global_steps
 
             # Bootstrap final value and compute GAE
             with t.no_grad():
@@ -239,12 +236,12 @@ class Trainer:
                 buffer.compute_gae(last_value_1, done)
 
             # PPO update
-            if os.environ.get("PROFILE_MODE", None):
+            if os.environ.get("PROFILE_MODE"):
                 ppo_update_start_time = time.time()
             
             actor_loss, critic_loss, entropy, ratio_mean, advantage_mean = self.ppo_update(buffer, net_1, optimiser_1)
             
-            if os.environ.get("PROFILE_MODE", None):
+            if os.environ.get("PROFILE_MODE"):
                 ppo_update_end_time = time.time()
                 print(f"\t PPO update time: {ppo_update_end_time - ppo_update_start_time:.3f} seconds")
 
@@ -337,7 +334,7 @@ class Trainer:
         state, _ = rec_env.reset()
         ep_return = np.zeros(2)
 
-        if os.environ.get("PROFILE_MODE", None):
+        if os.environ.get("PROFILE_MODE"):
             env_step_times = []
 
         try:
@@ -351,12 +348,12 @@ class Trainer:
                 action = self.join_actions(action_1, action_2)
 
 
-                if os.environ.get("PROFILE_MODE", None):
+                if os.environ.get("PROFILE_MODE"):
                     env_step_start_time = time.time()
                 
                 state, reward, terminated, truncated, _ = rec_env.step(action)
                 
-                if os.environ.get("PROFILE_MODE", None):
+                if os.environ.get("PROFILE_MODE"):
                     env_step_end_time = time.time()
                     env_step_times.append(env_step_end_time - env_step_start_time)
             
@@ -370,7 +367,7 @@ class Trainer:
         
         rec_env.close()
 
-        if os.environ.get("PROFILE_MODE", None):
+        if os.environ.get("PROFILE_MODE"):
             print(f"\t [video] Average env step time: {np.mean(env_step_times):.3f} seconds")
         
         print(f"\t [video] step {step}:\t return: {ep_return}")

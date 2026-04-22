@@ -185,7 +185,7 @@ class AdvancedEloBased_CheckpointManagement:
         current_elo = int(current_elo)
         
         if self.checkpoint_counter == 0:
-            return current_elo
+            return self.elo_cfg.initial_elo
 
         if np.random.rand() < self.loading_latest_ratio:
             checkpoint_sample = self.checkpoint_counter - 1
