@@ -10,7 +10,10 @@
             "request": "launch",
             "program": "ppo_trainer.py",
             "console": "integratedTerminal",
-            "justMyCode": false
+            "justMyCode": false,
+            "env": {
+                "DEBUG_MODE": "1"
+            }
         }
     ]
 }

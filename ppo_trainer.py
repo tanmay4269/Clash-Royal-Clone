@@ -19,6 +19,7 @@ import cr_gym_env
 from cr_flatten_norm_wrapper import CRFlattenNormWrapper
 
 from rollout_buffer import RolloutBuffer
+from checkpoint_management import *
 
 import wandb
 
@@ -35,7 +36,7 @@ class Trainer:
         self.env = gym.make(self.gym_env_name)
         self.env = CRFlattenNormWrapper(self.env)
 
-        self.arena = self.env.env.env.env.arena
+        self.arena = self.env.env.env.env.arena  # TODO: do this better
         self.max_num_objects = self.arena.max_num_objects
 
         #
@@ -60,7 +61,7 @@ class Trainer:
         self.cfg.network.trunk_extra_in_ch = 2
         self.cfg.network.trunk_mid_ch = 128
         
-        self.cfg.network.num_cards_in_deck = self.env.env.env.env.NUM_CARDS_IN_DECK
+        self.cfg.network.num_cards_in_deck = self.env.env.env.env.NUM_CARDS_IN_DECK  # TODO: do this better
         self.cfg.network.max_num_cards = self.max_num_objects
         self.cfg.network.position_space_width = self.arena.width
         self.cfg.network.position_space_height = self.arena.height
@@ -68,18 +69,35 @@ class Trainer:
         self.cfg.network.invalid_position_mask = t.tensor(invalid_position_mask).flatten()
 
         # Buffer Related
-        self.cfg.buffer.n_steps = 2048  # Each game is duration * 1/fps steps long, need to check how many games in a buffer is a sweet spot
+        self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.env.env.env.FIXED_DT * 20)  # Usually 10 to 100 episodes
         self.cfg.buffer.gae_gamma = 0.99
         self.cfg.buffer.gae_lambda = 0.95
 
+        # Elo Rating
+        self.cfg.elo.initial_rating = 1200
+        self.cfg.elo.scale = 400
+        self.cfg.elo.k_factor = 32
+
+        self.current_elo = self.cfg.elo.initial_rating
+
         # Player Pool
-        self.cfg.checkpoint_every_k_ppo_updates = 5
-        
-        self.checkpoint_dir = "./checkpoints"
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
-        
-        self.checkpoint_counter = 0
-        self.cfg.sample_policy_from_latest_k_checkpoints = 100
+        # self.checkpoint_manager = AdvancedTemporal_CheckpointManagement(
+        #     checkpoint_dir="./checkpoints",
+        #     loading_latest_ratio=0.5,
+        #     loading_delta_window=0.2,
+        #     min_games_before_checkpointing=100,
+        #     score_queue_size=100,
+        #     avg_score_threshold=0.55,
+        # )
+
+        self.checkpoint_manager = AdvancedEloBased_CheckpointManagement(
+            checkpoint_dir="./checkpoints",
+            elo_cfg=self.cfg.elo.to_dict(),
+            loading_latest_ratio=0.5,
+            min_games_before_checkpointing=100,
+            score_queue_size=100,
+            avg_score_threshold=0.55
+        )
 
         # PPO Update
         self.cfg.ppo_clip = 0.2
@@ -88,22 +106,24 @@ class Trainer:
         # Loss
         self.cfg.lr = 3e-4 
         self.cfg.critic_loss_coef = 0.5
-        self.entropy_loss_coef = 0.005
+        self.entropy_loss_coef = 0.05
 
         # Misc
         self.cfg.minibatch_size = 128
-        self.cfg.k_epochs = 10  # gradient steps per rollout
+        self.cfg.k_epochs = 3  # gradient steps per rollout
         self.cfg.max_steps = 1_000_000_000  # total env steps
 
         # Replay storing
         self.video_dir = "./videos/try_1"
-        self.video_every = 10_000
-        # self.video_every = 250_000
+        self.video_every = 250_000
+        if os.environ.get("DEBUG_MODE", None):
+            self.video_every = 5_000
         os.makedirs(self.video_dir, exist_ok=True)
 
         # WANDB logging
-        # self.wandb_logging = False
         self.wandb_logging = True
+        if os.environ.get("DEBUG_MODE", None):
+            self.wandb_logging = False
 
         if self.wandb_logging:
             wandb.init(
@@ -121,21 +141,19 @@ class Trainer:
         global_step = 0
         next_video = 0
 
-        # * DEBUG *
         net_1, optimiser_1 = self.get_network_and_optimiser()
         net_2 = deepcopy(net_1)
+        opponent_elo = self.cfg.elo.initial_rating
 
         state, _ = self.env.reset()
         state_1, state_2  = self.split_observations(state)
 
         while global_step < self.cfg.max_steps:
-            buffer_1 = RolloutBuffer(**self.cfg.buffer.to_dict())
-            # buffer_2 = RolloutBuffer(**self.cfg.buffer.to_dict())
+            buffer = RolloutBuffer(**self.cfg.buffer.to_dict())
 
             for _ in range(self.cfg.buffer.n_steps):
                 with t.no_grad():
                     action_1, log_prob_1, entropy_1, value_1 = net_1.get_action_and_value(state_1)
-                    # action_2, log_prob_2, entropy_2, value_2 = net_2.get_action_and_value(state_2) 
                     action_2, _, _, _ = net_2.get_action_and_value(state_2) 
 
                 action = self.join_actions(action_1, action_2)
@@ -148,8 +166,7 @@ class Trainer:
 
                 done = terminated or truncated
 
-                buffer_1.push(state_1, action_1, log_prob_1, reward[0], value_1, done)
-                # buffer_2.push(state_2, action_2, log_prob_2, reward[1], value_2, done)
+                buffer.push(state_1, action_1, log_prob_1, reward[0], value_1, done)
 
                 state = next_state
                 state_1, state_2  = self.split_observations(state)
@@ -157,18 +174,30 @@ class Trainer:
                 ep_return += np.array(reward)
 
                 if done:
-                    wandb.log({"episode_return": ep_return[0]}, step=global_step)
+                    score = 0
+                    if ep_return[0] > ep_return[1]:
+                        score = 1
+                    elif ep_return[0] == ep_return[1]:
+                        score = 0.5
+
+                    E_A = 1 / (1 + 10 ** ((opponent_elo - self.current_elo) / self.cfg.elo.scale))
+                    self.current_elo = self.current_elo + self.cfg.elo.k_factor * (score - E_A)
+
+                    if self.wandb_logging:
+                        wandb.log(
+                            {
+                                "elo": self.current_elo,
+                                "return": ep_return[0],
+                                "score": score
+                            }, 
+                            step=global_step
+                        )
+
+                    opponent_elo = self.checkpoint_manager.load(net_2, self.current_elo)
+                    self.checkpoint_manager.update(net_1, score, self.current_elo)
+
                     ep_returns.append(ep_return)
                     ep_return = np.zeros(2)
-
-                    # Change the opponent policy
-                    checkpoint_min = max(0, self.checkpoint_counter - self.cfg.sample_policy_from_latest_k_checkpoints)
-                    checkpoint_max = self.checkpoint_counter - 1
-                    if checkpoint_max > checkpoint_min:
-                        checkpoint_sample = np.random.randint(checkpoint_min, checkpoint_max)
-                        checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_{checkpoint_sample}.pt")
-                        net_2.load_state_dict(t.load(checkpoint_path, weights_only=True))
-                        print(f"Loaded opponent policy from checkpoint index {checkpoint_sample} at step {global_step}")
 
                     ep_seed = np.random.randint(0, 2**31)
                     state, _ = self.env.reset(seed=ep_seed)
@@ -183,31 +212,12 @@ class Trainer:
             # Bootstrap final value and compute GAE
             with t.no_grad():
                 _, _, _, last_value_1 = net_1.get_action_and_value(state_1)
-                # _, _, _, last_value_2 = net_2.get_action_and_value(state_2)
-                buffer_1.compute_gae(last_value_1, done)
+                buffer.compute_gae(last_value_1, done)
 
             # PPO update
-            actor_loss, critic_loss, entropy, ratio_mean, advantage_mean = self.ppo_update(buffer_1, net_1, optimiser_1)
+            actor_loss, critic_loss, entropy, ratio_mean, advantage_mean = self.ppo_update(buffer, net_1, optimiser_1)
             
-            # Checkpointing
-            if global_step % self.cfg.buffer.n_steps * self.cfg.checkpoint_every_k_ppo_updates == 0:
-                checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_{self.checkpoint_counter}.pt")
-                t.save(net_1.state_dict(), checkpoint_path)
-                print(f"Saved checkpoint number {self.checkpoint_counter} at step {global_step}")
-
-                # To prevent too much storage usage, we can start deleting old checkpoints once we have a good number of them
-                if self.checkpoint_counter >= self.cfg.sample_policy_from_latest_k_checkpoints:
-                    checkpoint_to_delete = self.checkpoint_counter - self.cfg.sample_policy_from_latest_k_checkpoints
-                    checkpoint_to_delete_path = os.path.join(self.checkpoint_dir, f"checkpoint_{checkpoint_to_delete}.pt")
-                    if os.path.exists(checkpoint_to_delete_path):
-                        os.remove(checkpoint_to_delete_path)
-                        print(f"Deleted old checkpoint at index {checkpoint_to_delete}")
-
-                self.checkpoint_counter += 1
-
-
-            buffer_1.reset()
-            # buffer_2.reset()
+            buffer.reset()
 
             avg_100 = np.mean(ep_returns[-100:], axis=0)
             avg_100_player_1 = avg_100[0]
@@ -225,54 +235,6 @@ class Trainer:
                     "ratio_mean":     ratio_mean,
                     "advantage_mean": advantage_mean
                 }, step=global_step)
-
-
-    def record_episode(self, step, net_1, net_2):
-        """Run one greedy episode and save video to self.video_dir."""
-
-        rec_env = gym.make(self.gym_env_name, render_mode="rgb_array")
-        rec_env = CRFlattenNormWrapper(rec_env)
-        rec_env = gym.wrappers.RecordVideo(
-            rec_env,
-            video_folder=self.video_dir,
-            name_prefix=f"step{step:07d}",
-            episode_trigger=lambda _: True,
-            disable_logger=True,
-        )
-        
-        state, _ = rec_env.reset()
-        ep_return = np.zeros(2)
-
-        try:
-            while True:
-                state_1, state_2  = self.split_observations(state)
-                
-                with t.no_grad():
-                    action_1, _, _, _ = net_1.get_action_and_value(state_1)
-                    action_2, _, _, _ = net_2.get_action_and_value(state_2)
-            
-                action = self.join_actions(action_1, action_2)
-
-                state, reward, terminated, truncated, _ = rec_env.step(action)
-            
-                ep_return += np.array(reward)
-            
-                if terminated or truncated:
-                    break
-
-        except Exception as e:
-            print(e)
-        
-        rec_env.close()
-        
-        print(f"\t [video] step {step}:\t return: {ep_return}")
-        
-        if self.wandb_logging:
-            video_path = os.path.join(self.video_dir, f"step{step:07d}-episode-0.mp4")
-            if os.path.exists(video_path):
-                wandb.log({"video": wandb.Video(video_path, format="mp4")}, step=step)
-
-        return ep_return
 
     
     def ppo_update(self, buffer, net, optimiser):
@@ -326,6 +288,54 @@ class Trainer:
             total_ratio_mean     / num_steps,
             total_advantage_mean / num_steps,
         )
+
+
+    def record_episode(self, step, net_1, net_2):
+        """Run one greedy episode and save video to self.video_dir."""
+
+        rec_env = gym.make(self.gym_env_name, render_mode="rgb_array")
+        rec_env = CRFlattenNormWrapper(rec_env)
+        rec_env = gym.wrappers.RecordVideo(
+            rec_env,
+            video_folder=self.video_dir,
+            name_prefix=f"step{step:07d}",
+            episode_trigger=lambda _: True,
+            disable_logger=True,
+        )
+        
+        state, _ = rec_env.reset()
+        ep_return = np.zeros(2)
+
+        try:
+            while True:
+                state_1, state_2  = self.split_observations(state)
+                
+                with t.no_grad():
+                    action_1, _, _, _ = net_1.get_action_and_value(state_1)
+                    action_2, _, _, _ = net_2.get_action_and_value(state_2)
+            
+                action = self.join_actions(action_1, action_2)
+
+                state, reward, terminated, truncated, _ = rec_env.step(action)
+            
+                ep_return += np.array(reward)
+            
+                if terminated or truncated:
+                    break
+
+        except Exception as e:
+            print(e)
+        
+        rec_env.close()
+        
+        print(f"\t [video] step {step}:\t return: {ep_return}")
+        
+        if self.wandb_logging:
+            video_path = os.path.join(self.video_dir, f"step{step:07d}-episode-0.mp4")
+            if os.path.exists(video_path):
+                wandb.log({"video": wandb.Video(video_path, format="mp4")}, step=step)
+
+        return ep_return
 
 
     def get_network_and_optimiser(self, weights=None):
