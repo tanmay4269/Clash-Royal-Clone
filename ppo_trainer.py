@@ -301,8 +301,8 @@ class Trainer:
                 # Critic Loss
                 G = returns
                 V = values
-                # critic_loss = ( (G - V) ** 2 ).mean()
-                critic_loss = F.smooth_l1_loss(input=V, target=G)
+                critic_loss = ( (G - V) ** 2 ).mean()
+                # critic_loss = F.smooth_l1_loss(input=V, target=G)
 
                 # Backprop
                 loss = actor_loss + self.cfg.critic_loss_coef * critic_loss - self.entropy_loss_coef * entropies.mean()
