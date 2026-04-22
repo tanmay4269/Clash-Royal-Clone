@@ -1,3 +1,8 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pygame")
+warnings.filterwarnings("ignore", category=UserWarning, module="gymnasium")  # TODO: fix code later
+
+
 import os
 import time
 from copy import deepcopy
@@ -23,10 +28,6 @@ from rollout_buffer import RolloutBuffer
 from checkpoint_management import *
 
 import wandb
-
-# TODO: fix code later
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="gymnasium")
 
 
 class Trainer:
@@ -127,7 +128,10 @@ class Trainer:
         self.entropy_loss_coef = 0.05
 
         # Misc
-        self.cfg.minibatch_size = 128
+        self.cfg.minibatch_size = 2048
+        if os.environ.get("DEBUG_MODE", None):
+            self.cfg.minibatch_size = 128
+
         self.cfg.k_epochs = 3  # gradient steps per rollout
         self.cfg.max_steps = 1_000_000_000  # total env steps
 
