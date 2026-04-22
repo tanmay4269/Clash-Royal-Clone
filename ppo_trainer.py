@@ -239,12 +239,12 @@ class Trainer:
                 buffer.compute_gae(last_value_1, done)
 
             # PPO update
-            if os.environ["PROFILE_MODE"]:
+            if os.environ.get("PROFILE_MODE", None):
                 ppo_update_start_time = time.time()
             
             actor_loss, critic_loss, entropy, ratio_mean, advantage_mean = self.ppo_update(buffer, net_1, optimiser_1)
             
-            if os.environ["PROFILE_MODE"]:
+            if os.environ.get("PROFILE_MODE", None):
                 ppo_update_end_time = time.time()
                 print(f"\t PPO update time: {ppo_update_end_time - ppo_update_start_time:.3f} seconds")
 
@@ -337,7 +337,7 @@ class Trainer:
         state, _ = rec_env.reset()
         ep_return = np.zeros(2)
 
-        if os.environ["PROFILE_MODE"]:
+        if os.environ.get("PROFILE_MODE", None):
             env_step_times = []
 
         try:
@@ -351,12 +351,12 @@ class Trainer:
                 action = self.join_actions(action_1, action_2)
 
 
-                if os.environ["PROFILE_MODE"]:
+                if os.environ.get("PROFILE_MODE", None):
                     env_step_start_time = time.time()
                 
                 state, reward, terminated, truncated, _ = rec_env.step(action)
                 
-                if os.environ["PROFILE_MODE"]:
+                if os.environ.get("PROFILE_MODE", None):
                     env_step_end_time = time.time()
                     env_step_times.append(env_step_end_time - env_step_start_time)
             
@@ -370,7 +370,7 @@ class Trainer:
         
         rec_env.close()
 
-        if os.environ["PROFILE_MODE"]:
+        if os.environ.get("PROFILE_MODE", None):
             print(f"\t [video] Average env step time: {np.mean(env_step_times):.3f} seconds")
         
         print(f"\t [video] step {step}:\t return: {ep_return}")
