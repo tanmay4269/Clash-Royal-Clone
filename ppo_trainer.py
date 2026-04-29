@@ -127,6 +127,15 @@ class Trainer:
         self.cfg.critic_loss_coef = 0.5
         self.entropy_loss_coef = 0.01
 
+        # LR Finder
+        self.cfg.lr_tuner.enabled = True
+        self.cfg.lr_tuner.min_lr = 1e-7
+        self.cfg.lr_tuner.max_lr = 1e-1
+        self.cfg.lr_tuner.num_steps = 200
+        self.cfg.lr_tuner.pick_lr_factor = 0.3
+
+        self.lr_tuned = False
+
         # Misc
         self.cfg.minibatch_size = 2048
         if os.environ.get("DEBUG_MODE"):
@@ -277,7 +286,10 @@ class Trainer:
 
     
     def ppo_update(self, buffer, net, optimiser):
-        # TODO: use an average meter instead 
+        if self.cfg.lr_tuner.enabled and not self.lr_tuned:
+            self.lr_finder(buffer, net, optimiser)
+            self.lr_tuned = True
+
         num_steps = 0
         total_actor_loss = 0
         total_critic_loss = 0
@@ -287,38 +299,20 @@ class Trainer:
 
         for epoch in range(self.cfg.k_epochs):
             for batch in buffer.get_minibatches(self.cfg.minibatch_size):
-                states, actions, old_log_probs, advantages, returns = batch
-
-                # Actor Loss
-                _, new_log_probs, entropies, values = net.get_action_and_value(states, actions)
-                ratio = (new_log_probs - old_log_probs).exp()
-
-                actor_loss = -t.min(
-                    advantages * ratio, 
-                    advantages * t.clip(ratio, 1 - self.cfg.ppo_clip, 1 + self.cfg.ppo_clip)
-                ).mean()
-
-                # Critic Loss
-                G = returns
-                V = values
-                critic_loss = ( (G - V) ** 2 ).mean()
-                # critic_loss = F.smooth_l1_loss(input=V, target=G)
-
-                # Backprop
-                loss = actor_loss + self.cfg.critic_loss_coef * critic_loss - self.entropy_loss_coef * entropies.mean()
-
-                optimiser.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(net.parameters(),  self.cfg.grad_clip)
-                optimiser.step()
+                actor_loss, critic_loss, entropy, ratio_mean, advantage_mean = self.on_batch_update(
+                    net,
+                    optimiser,
+                    batch,
+                    optimize=True,
+                )
 
                 num_steps += 1
-                total_actor_loss  += actor_loss.item()
-                total_critic_loss += critic_loss.item()
-                total_entropy     += entropies.mean().item()
+                total_actor_loss  += actor_loss
+                total_critic_loss += critic_loss
+                total_entropy     += entropy
 
-                total_ratio_mean     += ratio.mean().item()
-                total_advantage_mean += advantages.mean().item()
+                total_ratio_mean     += ratio_mean
+                total_advantage_mean += advantage_mean
 
         return (
             total_actor_loss     / num_steps,
@@ -326,6 +320,92 @@ class Trainer:
             total_entropy        / num_steps,
             total_ratio_mean     / num_steps,
             total_advantage_mean / num_steps,
+        )
+
+
+    def lr_finder(self, buffer, net, optimiser):
+        initial_state = deepcopy(net.state_dict())
+        min_lr = self.cfg.lr_tuner.min_lr
+        max_lr = self.cfg.lr_tuner.max_lr
+        num_steps = self.cfg.lr_tuner.num_steps
+
+        temp_net = deepcopy(net)
+        temp_optimiser = optim.Adam(temp_net.parameters(), lr=min_lr)
+
+        def lr_multiplier(step):
+            if num_steps <= 1:
+                return 1.0
+            return (max_lr / min_lr) ** (step / (num_steps - 1))
+
+        lr_scheduler = optim.lr_scheduler.LambdaLR(temp_optimiser, lr_lambda=lr_multiplier)
+
+        minibatches = list(buffer.get_minibatches(self.cfg.minibatch_size))
+        if not minibatches:
+            raise RuntimeError("lr_finder received no minibatches")
+
+        lr_history = []
+        loss_history = []
+
+        for step_idx in range(num_steps):
+            batch = minibatches[step_idx % len(minibatches)]
+            current_lr = temp_optimiser.param_groups[0]["lr"]
+
+            actor_loss, critic_loss, entropy, _, _ = self.on_batch_update(
+                temp_net,
+                temp_optimiser,
+                batch,
+                optimize=True,
+                scheduler=lr_scheduler,
+            )
+
+            lr_history.append(current_lr)
+            loss_history.append(actor_loss + self.cfg.critic_loss_coef * critic_loss - self.entropy_loss_coef * entropy)
+
+        net.load_state_dict(initial_state)
+
+        if not loss_history:
+            raise RuntimeError("lr_finder failed to produce loss values")
+
+        min_idx = int(np.argmin(loss_history))
+        min_loss_lr = lr_history[min_idx]
+        suggested_lr = float(np.clip(min_loss_lr * self.cfg.lr_tuner.pick_lr_factor, min_lr, max_lr))
+
+        for param_group in optimiser.param_groups:
+            param_group["lr"] = suggested_lr
+
+        self.cfg.lr = suggested_lr
+
+        print(f"[lr_finder] min_loss_lr: {min_loss_lr:.3e} | suggested_lr: {suggested_lr:.3e}")
+
+
+    def on_batch_update(self, net, optimiser, batch, optimize=False, scheduler=None):
+        states, actions, old_log_probs, advantages, returns = batch
+
+        _, new_log_probs, entropies, values = net.get_action_and_value(states, actions)
+        ratio = (new_log_probs - old_log_probs).exp()
+
+        actor_loss = -t.min(
+            advantages * ratio,
+            advantages * t.clip(ratio, 1 - self.cfg.ppo_clip, 1 + self.cfg.ppo_clip)
+        ).mean()
+
+        critic_loss = ((returns - values) ** 2).mean()
+        loss = actor_loss + self.cfg.critic_loss_coef * critic_loss - self.entropy_loss_coef * entropies.mean()
+
+        if optimize:
+            optimiser.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(net.parameters(), self.cfg.grad_clip)
+            optimiser.step()
+            if scheduler is not None:
+                scheduler.step()
+
+        return (
+            actor_loss.item(),
+            critic_loss.item(),
+            entropies.mean().item(),
+            ratio.mean().item(),
+            advantages.mean().item(),
         )
 
 
