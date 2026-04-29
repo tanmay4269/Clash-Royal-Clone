@@ -26,6 +26,7 @@ from cr_flatten_norm_wrapper import CRFlattenNormWrapper
 
 from rollout_buffer import RolloutBuffer
 from checkpoint_management import *
+from utils import AverageMeter
 
 import wandb
 
@@ -125,9 +126,10 @@ class Trainer:
         # Loss
         self.cfg.lr = 3e-4 * 4  # sqrt n law
         self.cfg.critic_loss_coef = 0.5
-        self.entropy_loss_coef = 0.01
+        self.entropy_loss_coef = 0.01  # TODO: later try linear decay
 
         # LR Finder
+        # self.cfg.lr_tuner.enabled = False
         self.cfg.lr_tuner.enabled = True
         self.cfg.lr_tuner.min_lr = 1e-7
         self.cfg.lr_tuner.max_lr = 1e-1
@@ -143,6 +145,11 @@ class Trainer:
 
         self.cfg.k_epochs = 3  # gradient steps per rollout
         self.cfg.max_steps = 1_000_000_000  # total env steps
+
+        # None, 'single-buffer', or 'fixed-opponent'
+        # self.overfit_mode = None
+        # self.overfit_mode = 'single-buffer'
+        self.overfit_mode = 'fixed-opponent'
 
         # Replay storing
         self.video_dir = "./videos/try_4"
@@ -176,7 +183,7 @@ class Trainer:
         net_2 = deepcopy(net_1)
         opponent_elo = self.cfg.elo.initial_rating
 
-        state, _ = self.env.reset()
+        state, _ = self.env.reset(seed=self.cfg.seed)
         state_1, state_2  = self.split_observations(state)
 
         while global_step < self.cfg.max_steps:
@@ -197,13 +204,12 @@ class Trainer:
 
                 done = terminated or truncated
 
-                # buffer.push(state_1, action_1, log_prob_1, reward[0], value_1, done)
                 buffer.push(state_1, action_1, log_prob_1, reward[0], value_1, terminated)
                 """
-                If a game ends simply because time ran out (truncated), GAE will set (1 - next_done) to 0. 
-                This incorrectly forces the value of the final state to 0, making the critic think running out 
-                of time violently acts as a massive negative return drop.
-                Solution: PPO should only mask out values if the agent actually "dies" or the game ends artificially.
+                    If a game ends simply because time ran out (truncated), GAE will set (1 - next_done) to 0. 
+                    This incorrectly forces the value of the final state to 0, making the critic think running out 
+                    of time violently acts as a massive negative return drop.
+                    Solution: PPO should only mask out values if the agent actually "dies" or the game ends artificially.
                 """
 
                 state = next_state
@@ -233,13 +239,15 @@ class Trainer:
                             step=global_step
                         )
 
-                    opponent_elo = self.checkpoint_manager.load(net_2, self.current_elo)
-                    self.checkpoint_manager.update(net_1, score, self.current_elo)
-
                     ep_returns.append(ep_return)
                     ep_return = np.zeros(2)
 
-                    ep_seed = np.random.randint(0, 2**31)
+                    ep_seed = self.cfg.seed
+                    if not self.overfit_mode == 'fixed-opponent':
+                        opponent_elo = self.checkpoint_manager.load(net_2, self.current_elo)
+                        self.checkpoint_manager.update(net_1, score, self.current_elo)
+                        ep_seed = np.random.randint(0, 2**31)
+
                     state, _ = self.env.reset(seed=ep_seed)
                     state_1, state_2  = self.split_observations(state)
 
@@ -252,36 +260,27 @@ class Trainer:
             # Bootstrap final value and compute GAE
             with t.no_grad():
                 _, _, _, last_value_1 = net_1.get_action_and_value(state_1)
-                # buffer.compute_gae(last_value_1, done)
                 buffer.compute_gae(last_value_1, terminated)
 
             # PPO update
-            if os.environ.get("PROFILE_MODE"):
-                ppo_update_start_time = time.time()
+            actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance = \
+                self.ppo_update(buffer, net_1, optimiser_1)
             
-            actor_loss, critic_loss, entropy, ratio_mean, advantage_mean = self.ppo_update(buffer, net_1, optimiser_1)
-            
-            if os.environ.get("PROFILE_MODE"):
-                ppo_update_end_time = time.time()
-                print(f"\t PPO update time: {ppo_update_end_time - ppo_update_start_time:.3f} seconds")
-
             buffer.reset()
 
-            avg_100 = np.mean(ep_returns[-100:], axis=0)
-            avg_100_player_1 = avg_100[0]
-
             print(
-                f"step {global_step:7d} | avg(last 100 eps): {avg_100_player_1:10.3f} | "
+                f"step {global_step:7d} | avg(last 100 eps): {(np.mean(ep_returns[-100:], axis=0)[0]):10.3f} | "
                 f"actor_loss: {actor_loss:7.3f} | critic_loss: {critic_loss:7.3f} | entropy: {entropy:.3f}"
             )
 
             if self.wandb_logging:
                 wandb.log({
-                    "actor_loss":     actor_loss,
-                    "critic_loss":    critic_loss,
-                    "entropy":        entropy,
-                    "ratio_mean":     ratio_mean,
-                    "advantage_mean": advantage_mean
+                    "actor_loss":         actor_loss,
+                    "critic_loss":        critic_loss,
+                    "entropy":            entropy,
+                    "ratio_mean":         ratio_mean,
+                    "advantage_mean":     advantage_mean,
+                    "explained_variance": explained_variance
                 }, step=global_step)
 
     
@@ -290,36 +289,97 @@ class Trainer:
             self.lr_finder(buffer, net, optimiser)
             self.lr_tuned = True
 
-        num_steps = 0
-        total_actor_loss = 0
-        total_critic_loss = 0
-        total_entropy = 0
-        total_ratio_mean = 0
-        total_advantage_mean = 0
+        if os.environ.get("PROFILE_MODE"):
+            ppo_update_start_time = time.time()
 
-        for epoch in range(self.cfg.k_epochs):
+        num_epochs = self.cfg.k_epochs
+        if self.overfit_mode == 'single-buffer':
+            num_epochs = 1_000_000
+            
+        actor_loss_meter = AverageMeter()
+        critic_loss_meter = AverageMeter()
+        entropy_meter = AverageMeter()
+        ratio_mean_meter = AverageMeter()
+        advantage_mean_meter = AverageMeter()
+        explained_variance_meter = AverageMeter()
+
+        for epoch in range(num_epochs):
             for batch in buffer.get_minibatches(self.cfg.minibatch_size):
-                actor_loss, critic_loss, entropy, ratio_mean, advantage_mean = self.on_batch_update(
-                    net,
-                    optimiser,
-                    batch,
-                    optimize=True,
-                )
+                actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance = \
+                    self.on_batch_update(
+                        net,
+                        optimiser,
+                        batch,
+                        optimize=True,
+                    )
 
-                num_steps += 1
-                total_actor_loss  += actor_loss
-                total_critic_loss += critic_loss
-                total_entropy     += entropy
+                actor_loss_meter.add_sample(actor_loss)
+                critic_loss_meter.add_sample(critic_loss)
+                entropy_meter.add_sample(entropy)
+                ratio_mean_meter.add_sample(ratio_mean)
+                advantage_mean_meter.add_sample(advantage_mean)
+                explained_variance_meter.add_sample(explained_variance)
 
-                total_ratio_mean     += ratio_mean
-                total_advantage_mean += advantage_mean
+            if epoch % 10 == 0 and self.overfit_mode == 'single-buffer':
+                window = 10 * len(buffer) // self.cfg.minibatch_size
+                _log = {
+                    "actor_loss":         actor_loss_meter.window_average(window),
+                    "critic_loss":        critic_loss_meter.window_average(window),
+                    "entropy":            entropy_meter.window_average(window),
+                    "ratio_mean":         ratio_mean_meter.window_average(window),
+                    "advantage_mean":     advantage_mean_meter.window_average(window),
+                    "explained_variance": explained_variance_meter.window_average(window)
+                }
+
+                if self.wandb_logging:
+                    wandb.log(_log, step=epoch)
+                print(f"Epoch {epoch:7d} | " + " | ".join([f"{k}: {v:.3f}" for k, v in _log.items()]))
+
+        if os.environ.get("PROFILE_MODE"):
+            ppo_update_end_time = time.time()
+            print(f"PPO update time: {ppo_update_end_time - ppo_update_start_time:.3f} seconds")
 
         return (
-            total_actor_loss     / num_steps,
-            total_critic_loss    / num_steps, 
-            total_entropy        / num_steps,
-            total_ratio_mean     / num_steps,
-            total_advantage_mean / num_steps,
+            actor_loss_meter.average(),
+            critic_loss_meter.average(),
+            entropy_meter.average(),
+            ratio_mean_meter.average(),
+            advantage_mean_meter.average(),
+            explained_variance_meter.average()
+        )
+
+
+    def on_batch_update(self, net, optimiser, batch, optimize=False, scheduler=None):
+        states, actions, old_log_probs, advantages, returns = batch
+
+        _, new_log_probs, entropies, values = net.get_action_and_value(states, actions)
+        ratio = (new_log_probs - old_log_probs).exp()
+
+        actor_loss = -t.min(
+            advantages * ratio,
+            advantages * t.clip(ratio, 1 - self.cfg.ppo_clip, 1 + self.cfg.ppo_clip)
+        ).mean()
+
+        critic_loss = ((returns - values) ** 2).mean()
+        loss = actor_loss + self.cfg.critic_loss_coef * critic_loss - self.entropy_loss_coef * entropies.mean()
+
+        if optimize:
+            optimiser.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(net.parameters(), self.cfg.grad_clip)
+            optimiser.step()
+            if scheduler is not None:
+                scheduler.step()
+
+        explained_variance = 1 - (returns - values).var() / returns.var()
+
+        return (
+            actor_loss.item(),
+            critic_loss.item(),
+            entropies.mean().item(),
+            ratio.mean().item(),
+            advantages.mean().item(),
+            explained_variance.item(),
         )
 
 
@@ -350,7 +410,7 @@ class Trainer:
             batch = minibatches[step_idx % len(minibatches)]
             current_lr = temp_optimiser.param_groups[0]["lr"]
 
-            actor_loss, critic_loss, entropy, _, _ = self.on_batch_update(
+            actor_loss, critic_loss, entropy, _, _, _ = self.on_batch_update(
                 temp_net,
                 temp_optimiser,
                 batch,
@@ -376,37 +436,6 @@ class Trainer:
         self.cfg.lr = suggested_lr
 
         print(f"[lr_finder] min_loss_lr: {min_loss_lr:.3e} | suggested_lr: {suggested_lr:.3e}")
-
-
-    def on_batch_update(self, net, optimiser, batch, optimize=False, scheduler=None):
-        states, actions, old_log_probs, advantages, returns = batch
-
-        _, new_log_probs, entropies, values = net.get_action_and_value(states, actions)
-        ratio = (new_log_probs - old_log_probs).exp()
-
-        actor_loss = -t.min(
-            advantages * ratio,
-            advantages * t.clip(ratio, 1 - self.cfg.ppo_clip, 1 + self.cfg.ppo_clip)
-        ).mean()
-
-        critic_loss = ((returns - values) ** 2).mean()
-        loss = actor_loss + self.cfg.critic_loss_coef * critic_loss - self.entropy_loss_coef * entropies.mean()
-
-        if optimize:
-            optimiser.zero_grad()
-            loss.backward()
-            nn.utils.clip_grad_norm_(net.parameters(), self.cfg.grad_clip)
-            optimiser.step()
-            if scheduler is not None:
-                scheduler.step()
-
-        return (
-            actor_loss.item(),
-            critic_loss.item(),
-            entropies.mean().item(),
-            ratio.mean().item(),
-            advantages.mean().item(),
-        )
 
 
     def record_episode(self, step, net_1, net_2):
@@ -459,9 +488,9 @@ class Trainer:
         rec_env.close()
 
         if os.environ.get("PROFILE_MODE"):
-            print(f"\t [video] Average env step time: {np.mean(env_step_times):.3f} seconds")
+            print(f"[video] Average env step time: {np.mean(env_step_times):.3f} seconds")
         
-        print(f"\t [video] step {step}:\t return: {ep_return}")
+        print(f"[video] step {step}:\t return: {ep_return}")
         
         if self.wandb_logging:
             video_path = os.path.join(self.video_dir, f"step{step:07d}-episode-0.mp4")

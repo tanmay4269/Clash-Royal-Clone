@@ -115,6 +115,10 @@ class RolloutBuffer:
             
         return unflattened_dict
 
+
+    def __len__(self):
+        return self.n_steps
+
     
     def reset(self):
         self.ptr = 0
