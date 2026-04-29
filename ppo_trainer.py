@@ -264,7 +264,7 @@ class Trainer:
 
             # PPO update
             actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance = \
-                self.ppo_update(buffer, net_1, optimiser_1)
+                self.ppo_update(buffer, net_1, optimiser_1, global_step)
             
             buffer.reset()
 
@@ -284,10 +284,16 @@ class Trainer:
                 }, step=global_step)
 
     
-    def ppo_update(self, buffer, net, optimiser):
+    def ppo_update(self, buffer, net, optimiser, global_step=0):
         if self.cfg.lr_tuner.enabled and not self.lr_tuned:
             self.lr_finder(buffer, net, optimiser)
             self.lr_tuned = True
+
+        # Linear Learning Rate Decay
+        frac = max(0.0, 1.0 - (global_step / self.cfg.max_steps))
+        current_lr = self.cfg.lr * frac
+        for param_group in optimiser.param_groups:
+            param_group["lr"] = current_lr
 
         if os.environ.get("PROFILE_MODE"):
             ppo_update_start_time = time.time()
