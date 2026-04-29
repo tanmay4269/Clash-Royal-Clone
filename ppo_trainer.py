@@ -384,6 +384,8 @@ class Trainer:
 
 
     def lr_finder(self, buffer, net, optimiser):
+        print("[lr_finder] Starting learning rate tuning...")
+
         initial_state = deepcopy(net.state_dict())
         min_lr = self.cfg.lr_tuner.min_lr
         max_lr = self.cfg.lr_tuner.max_lr
@@ -405,6 +407,10 @@ class Trainer:
 
         lr_history = []
         loss_history = []
+        
+        beta = 0.98  # smoothing factor
+        avg_loss = 0.0
+        best_loss = 0.0
 
         for step_idx in range(num_steps):
             batch = minibatches[step_idx % len(minibatches)]
@@ -418,13 +424,31 @@ class Trainer:
                 scheduler=lr_scheduler,
             )
 
-            lr_history.append(current_lr)
-            loss_history.append(actor_loss + self.cfg.critic_loss_coef * critic_loss - self.entropy_loss_coef * entropy)
+            # raw_loss = actor_loss + self.cfg.critic_loss_coef * critic_loss - self.entropy_loss_coef * entropy
 
-        net.load_state_dict(initial_state)
+            # In PPO, Actor Objective + Entropy behaves terribly in LR Searches
+            # because large steps break the trust region ratio, causing loss to explode instantly.
+            # Using just the Critic loss (MSE) behaves like standard supervised regression.
+            raw_loss = critic_loss
+            
+            # Exponentially smooth the loss to handle batch variance
+            avg_loss = beta * avg_loss + (1 - beta) * raw_loss
+            smoothed_loss = avg_loss / (1 - beta**(step_idx + 1)) # bias correction
+
+            # Stop if loss explodes (diverges)
+            if step_idx > 0 and smoothed_loss > 4 * best_loss:
+                break
+                
+            if step_idx == 0 or smoothed_loss < best_loss:
+                best_loss = smoothed_loss
+
+            lr_history.append(current_lr)
+            loss_history.append(smoothed_loss)
+
+        temp_net.load_state_dict(initial_state)
 
         if not loss_history:
-            raise RuntimeError("lr_finder failed to produce loss values")
+            raise RuntimeError("[lr_finder] failed to produce loss values")
 
         min_idx = int(np.argmin(loss_history))
         min_loss_lr = lr_history[min_idx]
