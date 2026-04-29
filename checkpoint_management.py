@@ -191,27 +191,32 @@ class AdvancedEloBased_CheckpointManagement:
         if np.random.rand() < self.loading_latest_ratio:
             checkpoint_sample = self.checkpoint_counter - 1
 
-            opponent_elo, checkpoint_path = self.stored_by_idx.get(checkpoint_sample, None)
+            opponent_elo, checkpoint_path = self.stored_by_idx[checkpoint_sample]
 
             net.load_state_dict(t.load(checkpoint_path, weights_only=True))
             return opponent_elo
 
+        opponent_elos = list(self.stored_by_elo.keys())
+
         E_As = []
-        for opponent_elo in self.stored_by_elo.keys():
+        for opponent_elo in opponent_elos:
             E_As.append(
                 1 / (1 + 10 ** ((opponent_elo - current_elo) / self.elo_cfg.scale))
             )
 
         probs = 0.5 - abs(0.5 - np.array(E_As))  # peak at 0.5, falls off to 0 on either extremes
-        probs = probs / np.sum(probs)
-        checkpoint_sample = np.random.choice(len(E_As), p=probs)
+        
+        prob_sum = np.sum(probs)
+        if prob_sum > 0:
+            probs = probs / prob_sum
+        else:
+            probs = np.ones_like(probs) / len(probs)
+            
+        chosen_elo = np.random.choice(opponent_elos, p=probs)
+        checkpoint_indices = self.stored_by_elo[chosen_elo]
+        checkpoint_sample = np.random.choice(checkpoint_indices)
 
-        checkpoint_indices = self.stored_by_elo.get(checkpoint_sample, None)
-        assert checkpoint_indices is not None
-
-        checkpoint_sample = np.random.choice(len(checkpoint_indices))
-        opponent_elo, checkpoint_path = self.stored_by_idx.get(checkpoint_sample, None)
-        assert checkpoint_path is not None
+        opponent_elo, checkpoint_path = self.stored_by_idx[checkpoint_sample]
 
         net.load_state_dict(t.load(checkpoint_path, weights_only=True))
         return opponent_elo
