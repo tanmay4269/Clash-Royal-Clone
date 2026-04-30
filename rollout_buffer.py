@@ -56,7 +56,7 @@ class RolloutBuffer:
                 next_done = last_done
             else:
                 next_value = self.values[i + 1]
-                next_done = self.dones[i + 1]
+                next_done = self.dones[i]
 
             td_error = self.rewards[i] + self.gae_gamma * next_value * (1 - next_done) - self.values[i]
             advantage = td_error + self.gae_gamma * self.gae_lambda * (1 - next_done) * advantage

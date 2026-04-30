@@ -160,7 +160,7 @@ class ActorCritic(nn.Module):
         deck_log_prob = deck_dist.log_prob(action_deck)
         pos_log_prob  = pos_dist.log_prob(action_pos)
 
-        log_prob = skip_log_prob + deck_log_prob + pos_log_prob
+        log_prob = skip_log_prob + (1.0 - action_skip) * (deck_log_prob + pos_log_prob)
 
         # Entropy
         skip_entropy = skip_dist.entropy()

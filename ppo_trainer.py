@@ -63,9 +63,16 @@ class Trainer:
         tiled_occupancy_grid = np.where(occupancy_grid == 1, 1, 0)[scale//2::scale, scale//2::scale]
         invalid_position_mask = tiled_occupancy_grid.astype(bool).T
         invalid_position_mask[self.arena.height//2 :, :] = True  # bottom/opponent half is always invalid in player-1 view
+        
+        # invalid_position_mask = tiled_occupancy_grid.astype(bool)
+        # invalid_position_mask[: self.arena.height//2, :] = True
 
         ### CONFIGS ###
         self.cfg = Dict()
+        
+        self.cfg.run_name = f"{time.strftime('%m%d-%H%M%S')}"
+        if os.environ.get("DEBUG_MODE"):
+            self.cfg.run_name = f"DEBUG_{self.cfg.run_name}"
 
         self.cfg.seed = 42
         self.set_seed(self.cfg.seed)
@@ -101,23 +108,26 @@ class Trainer:
         self.current_elo = self.cfg.elo.initial_rating
 
         # Player Pool
-        # self.checkpoint_manager = AdvancedTemporal_CheckpointManagement(
-        #     checkpoint_dir="./checkpoints",
-        #     loading_latest_ratio=0.5,
-        #     loading_delta_window=0.2,
-        #     min_games_before_checkpointing=100,
-        #     score_queue_size=100,
-        #     avg_score_threshold=0.55,
-        # )
+        self.cfg.checkpoint_manager_type = 'elo_based'
 
-        self.checkpoint_manager = AdvancedEloBased_CheckpointManagement(
-            checkpoint_dir="./checkpoints",
-            elo_cfg=self.cfg.elo,
-            loading_latest_ratio=0.5,
-            min_games_before_checkpointing=100,
-            score_queue_size=100,
-            avg_score_threshold=0.55
-        )
+        if self.cfg.checkpoint_manager_type == 'advanced_temporal':
+            self.checkpoint_manager = AdvancedTemporal_CheckpointManagement(
+                checkpoint_dir="./checkpoints",
+                loading_latest_ratio=0.5,
+                loading_delta_window=0.2,
+                min_games_before_checkpointing=100,
+                score_queue_size=100,
+                avg_score_threshold=0.55,
+            )
+        elif self.cfg.checkpoint_manager_type == 'elo_based':
+            self.checkpoint_manager = AdvancedEloBased_CheckpointManagement(
+                checkpoint_dir="./checkpoints",
+                elo_cfg=self.cfg.elo,
+                loading_latest_ratio=0.5,
+                min_games_before_checkpointing=100,
+                score_queue_size=100,
+                avg_score_threshold=0.55
+            )
 
         # PPO Update
         self.cfg.ppo_clip = 0.2
@@ -156,11 +166,15 @@ class Trainer:
         self.overfit_mode = 'fixed-opponent'
 
         # Replay storing
-        self.video_dir = "./videos/try_4"
+        self.video_dir = f"./videos/{self.cfg.run_name}/"
+        if os.environ.get("DEBUG_MODE"):
+            self.video_dir = "./videos/DEBUG/"
+            os.remove(self.video_dir) 
+        os.makedirs(self.video_dir, exist_ok=True)
+
         self.video_every_k_global_steps = 20_000
         if os.environ.get("DEBUG_MODE"):
             self.video_every_k_global_steps = 5_000
-        os.makedirs(self.video_dir, exist_ok=True)
 
         # WANDB logging
         self.wandb_logging = True
@@ -170,6 +184,7 @@ class Trainer:
         if self.wandb_logging:
             wandb.init(
                 project="clash_royale-ppo_self_play",
+                name=self.cfg.run_name,
                 config=self.cfg.to_dict()
             )
 
@@ -208,8 +223,12 @@ class Trainer:
                 try:
                     next_state, reward, terminated, truncated, _ = self.env.step(action)
                 except Exception as e:
-                    print(e)
+                    print(f"Env step failed: {e}")
+
+                    next_state = state  # stay in place safely
+                    reward = [0.0, 0.0] # neutral fallback
                     terminated = True
+                    truncated = False
 
                 done = terminated or truncated
 
