@@ -167,7 +167,7 @@ class ActorCritic(nn.Module):
         deck_entropy = deck_dist.entropy()
         pos_entropy  = pos_dist.entropy()
 
-        entropy = skip_entropy + deck_entropy + pos_entropy
+        entropy = skip_entropy + (1.0 - action_skip) * (deck_entropy + pos_entropy)
 
         action = {
             "skip": action_skip.detach(), 

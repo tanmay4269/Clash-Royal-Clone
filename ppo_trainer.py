@@ -153,8 +153,8 @@ class Trainer:
         if os.environ.get("DEBUG_MODE"):
             self.cfg.minibatch_size = 128
 
-        self.cfg.k_epochs = 3  # gradient steps per rollout
-        self.cfg.max_steps = 1_000_000_000  # total env steps
+        self.cfg.k_epochs = 6  # gradient steps per rollout
+        self.cfg.max_steps = 10_000_000  # total env steps
 
         # None, 'single-buffer', or 'fixed-opponent'
         # self.overfit_mode = None
@@ -200,6 +200,7 @@ class Trainer:
 
         state, _ = self.env.reset(seed=self.cfg.seed)
         state_1, state_2  = self.split_observations(state)
+        last_done = False
 
         while global_step < self.cfg.max_steps:
             buffer = RolloutBuffer(**self.cfg.buffer.to_dict())
@@ -226,6 +227,7 @@ class Trainer:
                     truncated = False
 
                 done = terminated or truncated
+                last_done = done
 
                 buffer.push(state_1, action_1, log_prob_1, reward[0], value_1, terminated)
                 """
@@ -273,13 +275,14 @@ class Trainer:
 
                     state, _ = self.env.reset(seed=ep_seed)
                     state_1, state_2  = self.split_observations(state)
+                    last_done = False  # fresh episode start — bootstrap is valid
 
                 global_step += 1
 
             # Bootstrap final value and compute GAE
             with t.no_grad():
                 _, _, _, last_value_1 = net_1.get_action_and_value(state_1)
-                buffer.compute_gae(last_value_1, terminated)
+                buffer.compute_gae(last_value_1, last_done)
 
             # PPO update
             actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance = \

@@ -65,7 +65,6 @@ class RolloutBuffer:
 
         # returns BEFORE normalizing advantages
         self.returns = self.advantages + self.values
-        self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)
 
 
     def get_minibatches(self, batch_size):
@@ -75,11 +74,15 @@ class RolloutBuffer:
         for start in range(0, self.n_steps - batch_size + 1, batch_size):
             batch_idx = indices[start : start + batch_size]
 
+            # Per-minibatch advantage normalization
+            mb_advantages = self.advantages[batch_idx]
+            mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+
             yield (
                 self.unflatten_dict(self.states[batch_idx], self.state_shapes),
                 self.unflatten_dict(self.actions[batch_idx], self.action_shapes),
                 self.log_probs[batch_idx],
-                self.advantages[batch_idx],
+                mb_advantages,
                 self.returns[batch_idx],
             )
 

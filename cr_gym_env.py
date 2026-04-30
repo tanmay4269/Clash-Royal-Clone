@@ -249,7 +249,7 @@ class ClashRoyaleEnv(gym.Env):
         
         self._cur_obs = self._get_obs()
 
-        reward = self._get_reward(prev_obs)
+        reward = self._get_reward(prev_obs, terminated, truncated)
         info = self._get_info()
 
         if self.render_mode == "human":
@@ -258,11 +258,12 @@ class ClashRoyaleEnv(gym.Env):
         return self._cur_obs, reward, terminated, truncated, info
 
 
-    def _get_reward(self, prev_obs):
+    def _get_reward(self, prev_obs, terminated=False, truncated=False):
         """
-        TODOs:
-        - additional reward when the princess towers are distroyed 
-        - additional reward when the game is one by someone and lost by the other
+        Three reward components (scaled so win/loss dominates):
+          1. Tower HP delta    — shaping signal,  ~1-2 cumulative per game
+          2. Tower kill bonus  — ±0.5 per tower, ~0-1.5 cumulative per game
+          3. Game outcome      — ±5.0 on win/loss
         """
 
         if prev_obs is None:
@@ -270,23 +271,46 @@ class ClashRoyaleEnv(gym.Env):
 
         player_1_reward, player_2_reward = 0.0, 0.0
 
+        # 1. Tower HP change (shaping) + 2. Tower destruction bonus
         for idx in [1, 2]:
             cur_dict  = self._cur_obs[f"player_{idx}_crown_towers"]
-            prev_dict = prev_obs[f"player_{idx}_crown_towers"] 
-
-            player_idx_reward = player_1_reward if idx == 1 else player_2_reward
+            prev_dict = prev_obs[f"player_{idx}_crown_towers"]
 
             for tower_str in cur_dict.keys():
-                delta = cur_dict[tower_str]["health"] - prev_dict[tower_str]["health"]
+                cur_health  = float(cur_dict[tower_str]["health"])
+                prev_health = float(prev_dict[tower_str]["health"])
+                delta = cur_health - prev_health  # negative when damage dealt
 
+                # HP delta (shaping)
                 if idx == 1:
-                    player_1_reward += delta
-                    player_2_reward -= delta
+                    player_1_reward += delta / 5_000.0
+                    player_2_reward -= delta / 5_000.0
                 else:
-                    player_1_reward -= delta
-                    player_2_reward += delta
+                    player_1_reward -= delta / 5_000.0
+                    player_2_reward += delta / 5_000.0
 
-        return player_1_reward / 1_000.0, player_2_reward / 1_000.0
+                # Tower destruction bonus
+                if prev_health > 0 and cur_health <= 0:
+                    if idx == 1:  # P1's tower destroyed → bad for P1
+                        player_1_reward -= 0.5
+                        player_2_reward += 0.5
+                    else:         # P2's tower destroyed → good for P1
+                        player_1_reward += 0.5
+                        player_2_reward -= 0.5
+
+        # 3. Game outcome
+        if terminated:
+            p1_king_h = float(self._cur_obs["player_1_crown_towers"]["king_tower"]["health"])
+            p2_king_h = float(self._cur_obs["player_2_crown_towers"]["king_tower"]["health"])
+
+            if p2_king_h <= 0:    # P1 wins
+                player_1_reward += 5.0
+                player_2_reward -= 5.0
+            elif p1_king_h <= 0:  # P2 wins
+                player_1_reward -= 5.0
+                player_2_reward += 5.0
+
+        return player_1_reward, player_2_reward
 
 
     def render(self):
