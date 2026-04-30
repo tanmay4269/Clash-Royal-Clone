@@ -4,8 +4,9 @@ warnings.filterwarnings("ignore", category=UserWarning, module="gymnasium")  # T
 
 
 import os
-import time; os.environ["TZ"] = "Asia/Kolkata"
+import argparse
 from copy import deepcopy
+import time; os.environ["TZ"] = "Asia/Kolkata"
 
 import random
 import numpy as np
@@ -34,7 +35,15 @@ import wandb
 
 
 class Trainer:
-    def __init__(self, gym_env_name):
+    def __init__(
+        self, 
+        gym_env_name, 
+        run_name=None, 
+        use_lr_tuner=True, 
+        overfit_mode=None, 
+        wandb_logging=True, 
+        debug=False
+):
         t.set_default_dtype(t.float32)
 
         if t.cuda.is_available():
@@ -46,6 +55,9 @@ class Trainer:
 
         t.set_default_device(device)
 
+        self.debug = debug or bool(os.environ.get("DEBUG_MODE"))
+        if self.debug:
+            os.environ["DEBUG_MODE"] = "1"
 
         self.gym_env_name = gym_env_name
 
@@ -69,8 +81,13 @@ class Trainer:
         ### CONFIGS ###
         self.cfg = Dict()
         
-        self.cfg.run_name = f"{time.strftime('%m%d-%H%M%S')}"
-        if os.environ.get("DEBUG_MODE"):
+        datetime_str = time.strftime('%m%d-%H%M%S')
+        if run_name:
+            self.cfg.run_name = f"{run_name}_{datetime_str}"
+        else:
+            self.cfg.run_name = datetime_str
+
+        if self.debug:
             self.cfg.run_name = f"DEBUG_{self.cfg.run_name}"
 
         self.cfg.seed = 42
@@ -96,7 +113,7 @@ class Trainer:
         self.cfg.buffer.gae_lambda = 0.95
 
         self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.unwrapped.FIXED_DT * 10)  # Usually 10 to 100 episodes
-        if os.environ.get("DEBUG_MODE"):
+        if self.debug:
             self.cfg.buffer.n_steps = 2048
 
         # Elo Rating
@@ -137,8 +154,8 @@ class Trainer:
         self.entropy_loss_coef = 0.01  # TODO: later try linear decay
 
         # LR Finder
-        self.cfg.lr_tuner.enabled = True
-        if os.environ.get("DEBUG_MODE"):
+        self.cfg.lr_tuner.enabled = use_lr_tuner
+        if self.debug:
             self.cfg.lr_tuner.enabled = False
 
         self.cfg.lr_tuner.min_lr = 1e-7
@@ -159,26 +176,21 @@ class Trainer:
         self.cfg.max_steps = 10_000_000  # total env steps
 
         # None, 'single-buffer', 'fixed-opponent', 'vs-random', 'vs-skip', or 'vs-scripted'
-        # self.overfit_mode = None
-        # self.overfit_mode = 'single-buffer'
-        # self.overfit_mode = 'fixed-opponent'
-        # self.overfit_mode = 'vs-random'
-        # self.overfit_mode = 'vs-skip'
-        self.overfit_mode = 'vs-scripted'
+        self.overfit_mode = overfit_mode
 
         # Replay storing
         self.video_dir = f"./videos/{self.cfg.run_name}/"
-        if os.environ.get("DEBUG_MODE"):
+        if self.debug:
             self.video_dir = "./videos/DEBUG/"
         os.makedirs(self.video_dir, exist_ok=True)
 
         self.video_every_k_global_steps = 20_000
-        if os.environ.get("DEBUG_MODE"):
+        if self.debug:
             self.video_every_k_global_steps = 5_000
 
         # WANDB logging
-        self.wandb_logging = True
-        if os.environ.get("DEBUG_MODE"):
+        self.wandb_logging = wandb_logging
+        if self.debug:
             self.wandb_logging = False
 
         if self.wandb_logging:
@@ -725,6 +737,46 @@ class Trainer:
 
 
 if __name__ == "__main__":
-    trainer = Trainer(gym_env_name="ClashRoyaleEnv-v0")
+    parser = argparse.ArgumentParser(description="Train PPO for Clash Royale")
+    parser.add_argument(
+        "--run_name", 
+        type=str, 
+        default=None, 
+        help="Prefix for the run name; date-time will be appended."
+    )
+    parser.add_argument(
+        "--use_lr_tuner", 
+        action=argparse.BooleanOptionalAction, 
+        default=True, 
+        help="Enable or disable LR tuner."
+    )
+    parser.add_argument(
+        "--overfit_mode", 
+        type=str, 
+        default=None, 
+        choices=['single-buffer', 'fixed-opponent', 'vs-random', 'vs-skip', 'vs-scripted'], 
+        help="Overfit mode to use."
+    )
+    parser.add_argument(
+        "--wandb_logging", 
+        action=argparse.BooleanOptionalAction, 
+        default=True, 
+        help="Enable or disable wandb logging."
+    )
+    parser.add_argument(
+        "--debug", 
+        action="store_true", 
+        help="Enable debug mode."
+    )
+    args = parser.parse_args()
+
+    trainer = Trainer(
+        gym_env_name="ClashRoyaleEnv-v0",
+        run_name=args.run_name,
+        use_lr_tuner=args.use_lr_tuner,
+        overfit_mode=args.overfit_mode,
+        wandb_logging=args.wandb_logging,
+        debug=args.debug
+    )
 
     trainer.train()
