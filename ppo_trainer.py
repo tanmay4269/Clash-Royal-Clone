@@ -18,7 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from network import ActorCritic, PseudoRandomNet
+from network import ActorCritic, BotNet
 
 import gymnasium as gym
 import cr_gym_env
@@ -158,11 +158,13 @@ class Trainer:
         self.cfg.k_epochs = 6  # gradient steps per rollout
         self.cfg.max_steps = 10_000_000  # total env steps
 
-        # None, 'single-buffer', 'fixed-opponent', or 'vs-random'
+        # None, 'single-buffer', 'fixed-opponent', 'vs-random', 'vs-skip', or 'vs-scripted'
         # self.overfit_mode = None
         # self.overfit_mode = 'single-buffer'
         # self.overfit_mode = 'fixed-opponent'
-        self.overfit_mode = 'vs-random'
+        # self.overfit_mode = 'vs-random'
+        # self.overfit_mode = 'vs-skip'
+        self.overfit_mode = 'vs-scripted'
 
         # Replay storing
         self.video_dir = f"./videos/{self.cfg.run_name}/"
@@ -198,18 +200,20 @@ class Trainer:
         # next_video = self.video_every_k_global_steps
 
         net_1, optimiser_1 = self.get_network_and_optimiser()
+        initial_net = deepcopy(net_1)
+        opponent_elo = self.cfg.elo.initial_rating
         
-        if self.overfit_mode == 'vs-random':
-            net_2 = PseudoRandomNet(
+        if self.overfit_mode in ['vs-random', 'vs-skip', 'vs-scripted']:
+            bot_type = self.overfit_mode.split('-')[1]
+            net_2 = BotNet(
+                bot_type,
                 self.cfg.network.invalid_position_mask, 
                 self.cfg.network.num_cards_in_deck, 
-                self.cfg.network.position_space_width * self.cfg.network.position_space_height
+                self.cfg.network.position_space_width,
+                self.cfg.network.position_space_height
             )
         else:
             net_2 = deepcopy(net_1)
-        
-        initial_net = deepcopy(net_1)
-        opponent_elo = self.cfg.elo.initial_rating
 
         state, _ = self.env.reset(seed=self.cfg.seed)
         state_1, state_2  = self.split_observations(state)
@@ -281,7 +285,7 @@ class Trainer:
                     ep_return = np.zeros(2)
 
                     ep_seed = self.cfg.seed
-                    if self.overfit_mode not in ['fixed-opponent', 'vs-random']:
+                    if self.overfit_mode not in ['fixed-opponent', 'vs-random', 'vs-skip', 'vs-scripted']:
                         opponent_elo = self.checkpoint_manager.load(net_2, self.current_elo)
                         self.checkpoint_manager.update(net_1, score, self.current_elo)
                         ep_seed = np.random.randint(0, 2**31)
