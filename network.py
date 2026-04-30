@@ -151,9 +151,9 @@ class ActorCritic(nn.Module):
             action_deck = deck_dist.sample()
             action_pos  = pos_dist.sample()
         else:
-            action_skip = action["skip"]
-            action_deck = action["deck_idx"]
-            action_pos  = action["position"]
+            action_skip = action["skip"].float()
+            action_deck = action["deck_idx"].long()
+            action_pos  = action["position"].long()
 
         # Log Probs
         skip_log_prob = skip_dist.log_prob(action_skip)
