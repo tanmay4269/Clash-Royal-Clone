@@ -176,3 +176,39 @@ class ActorCritic(nn.Module):
         }
 
         return action, log_prob, entropy, value
+
+
+class PseudoRandomNet:
+    def __init__(self, invalid_position_mask, num_cards_in_deck, position_space_size):
+        self.invalid_position_mask = invalid_position_mask
+        self.num_cards_in_deck = num_cards_in_deck
+        self.position_space_size = position_space_size
+        
+    def get_action_and_value(self, x, action=None):
+        B = x["my_cards"].shape[0] if isinstance(x, dict) else 1
+        skip_logits = t.zeros((B, 1))
+        deck_logits = t.zeros((B, self.num_cards_in_deck))
+        pos_logits = t.zeros((B, self.position_space_size))
+        
+        if self.invalid_position_mask is not None:
+            pos_logits = pos_logits.masked_fill(self.invalid_position_mask, float('-inf'))
+            
+        action = {
+            "skip": t.distributions.Bernoulli(logits=skip_logits).sample().detach(),
+            "deck_idx": t.distributions.Categorical(logits=deck_logits).sample().detach(),
+            "position": t.distributions.Categorical(logits=pos_logits).sample().detach(),
+        }
+        return action, None, None, None
+        
+    def __call__(self, x):
+        B = x["my_cards"].shape[0] if isinstance(x, dict) else 1
+        
+        value = t.zeros((B,))
+        skip_logits = t.zeros((B,))
+        deck_logits = t.zeros((B, self.num_cards_in_deck))
+        pos_logits = t.zeros((B, self.position_space_size))
+        
+        if self.invalid_position_mask is not None:
+            pos_logits = pos_logits.masked_fill(self.invalid_position_mask, float('-inf'))
+            
+        return value, skip_logits, deck_logits, pos_logits
