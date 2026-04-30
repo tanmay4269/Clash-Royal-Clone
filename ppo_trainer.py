@@ -4,7 +4,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="gymnasium")  # T
 
 
 import os
-import time
+import time; os.environ["TZ"] = "Asia/Kolkata"
 from copy import deepcopy
 
 import random
@@ -64,9 +64,6 @@ class Trainer:
         invalid_position_mask = tiled_occupancy_grid.astype(bool).T
         invalid_position_mask[self.arena.height//2 :, :] = True  # bottom/opponent half is always invalid in player-1 view
         
-        # invalid_position_mask = tiled_occupancy_grid.astype(bool)
-        # invalid_position_mask[: self.arena.height//2, :] = True
-
         ### CONFIGS ###
         self.cfg = Dict()
         
@@ -147,8 +144,7 @@ class Trainer:
         self.cfg.lr_tuner.num_steps = 200
         self.cfg.lr_tuner.pick_lr_factor = 0.3
 
-        if not self.cfg.lr_tuner.enabled:
-            self.cfg.lr = 3e-4 * 4  # sqrt n law
+        self.cfg.lr = 3e-4  # fallback
 
         self.lr_tuned = False
 
@@ -169,7 +165,6 @@ class Trainer:
         self.video_dir = f"./videos/{self.cfg.run_name}/"
         if os.environ.get("DEBUG_MODE"):
             self.video_dir = "./videos/DEBUG/"
-            os.remove(self.video_dir) 
         os.makedirs(self.video_dir, exist_ok=True)
 
         self.video_every_k_global_steps = 20_000
