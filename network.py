@@ -96,13 +96,18 @@ class ActorCritic(nn.Module):
         my_crown_tower_embeddings       = all_embeddings[:, 2 * self.max_num_cards : 2 * self.max_num_cards + 3]
         opponent_crown_tower_embeddings = all_embeddings[:, 2 * self.max_num_cards + 3 :]
 
+        def masked_mean(embeddings, entities):
+            mask = (entities.abs().sum(dim=-1, keepdim=True) > 0).to(dtype=embeddings.dtype)
+            count = mask.sum(dim=1).clamp(min=1.0)
+            return (embeddings * mask).sum(dim=1) / count
+
         trunk_input = t.cat([
             obs["game_completion_fraction"],
             obs["elixirs"],
             my_crown_tower_embeddings.flatten(start_dim=1),        # (B, 3 * entity_encoder_out_ch)
             opponent_crown_tower_embeddings.flatten(start_dim=1),  # (B, 3 * entity_encoder_out_ch)
-            my_card_embeddings.mean(dim=1),        # (B, entity_encoder_out_ch)
-            opponent_card_embeddings.mean(dim=1),  # (B, entity_encoder_out_ch)
+            masked_mean(my_card_embeddings, obs["my_cards"]),        # (B, entity_encoder_out_ch)
+            masked_mean(opponent_card_embeddings, obs["opponent_cards"]),  # (B, entity_encoder_out_ch)
         ], dim=-1).to(dtype=t.float32)  # (B, trunk_extra_in_ch + entity_encoder_out_ch)
 
         trunk_out = self.trunk(trunk_input)

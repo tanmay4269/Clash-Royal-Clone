@@ -26,7 +26,7 @@ from cr_flatten_norm_wrapper import CRFlattenNormWrapper
 
 from rollout_buffer import RolloutBuffer
 from checkpoint_management import *
-from utils import AverageMeter
+from utils import AverageMeter, HeatmapVisualizerWrapper
 
 import wandb
 
@@ -124,17 +124,21 @@ class Trainer:
         self.cfg.grad_clip = 0.5
 
         # Loss
-        self.cfg.lr = 3e-4 * 4  # sqrt n law
         self.cfg.critic_loss_coef = 0.5
         self.entropy_loss_coef = 0.01  # TODO: later try linear decay
 
         # LR Finder
-        # self.cfg.lr_tuner.enabled = False
         self.cfg.lr_tuner.enabled = True
+        if os.environ.get("DEBUG_MODE"):
+            self.cfg.lr_tuner.enabled = False
+
         self.cfg.lr_tuner.min_lr = 1e-7
         self.cfg.lr_tuner.max_lr = 1e-1
         self.cfg.lr_tuner.num_steps = 200
         self.cfg.lr_tuner.pick_lr_factor = 0.3
+
+        if not self.cfg.lr_tuner.enabled:
+            self.cfg.lr = 3e-4 * 4  # sqrt n law
 
         self.lr_tuned = False
 
@@ -177,7 +181,8 @@ class Trainer:
         ep_returns = []
 
         global_step = 0
-        next_video = self.video_every_k_global_steps
+        next_video = 0
+        # next_video = self.video_every_k_global_steps
 
         net_1, optimiser_1 = self.get_network_and_optimiser()
         net_2 = deepcopy(net_1)
@@ -190,6 +195,10 @@ class Trainer:
             buffer = RolloutBuffer(**self.cfg.buffer.to_dict())
 
             for _ in range(self.cfg.buffer.n_steps):
+                if global_step >= next_video:
+                    self.record_episode(global_step, net_1, net_2)
+                    next_video += self.video_every_k_global_steps
+
                 with t.no_grad():
                     action_1, log_prob_1, entropy_1, value_1 = net_1.get_action_and_value(state_1)
                     action_2, _, _, _ = net_2.get_action_and_value(state_2) 
@@ -253,10 +262,6 @@ class Trainer:
 
                 global_step += 1
 
-                if global_step >= next_video:
-                    self.record_episode(global_step, net_1, net_2)
-                    next_video += self.video_every_k_global_steps
-
             # Bootstrap final value and compute GAE
             with t.no_grad():
                 _, _, _, last_value_1 = net_1.get_action_and_value(state_1)
@@ -295,9 +300,6 @@ class Trainer:
         for param_group in optimiser.param_groups:
             param_group["lr"] = current_lr
 
-        if os.environ.get("PROFILE_MODE"):
-            ppo_update_start_time = time.time()
-
         num_epochs = self.cfg.k_epochs
         if self.overfit_mode == 'single-buffer':
             num_epochs = 1_000_000
@@ -308,6 +310,9 @@ class Trainer:
         ratio_mean_meter = AverageMeter()
         advantage_mean_meter = AverageMeter()
         explained_variance_meter = AverageMeter()
+
+        if os.environ.get("PROFILE_MODE"):
+            ppo_update_start_time = time.time()
 
         for epoch in range(num_epochs):
             for batch in buffer.get_minibatches(self.cfg.minibatch_size):
@@ -473,6 +478,7 @@ class Trainer:
 
         rec_env = gym.make(self.gym_env_name, render_mode="rgb_array")
         rec_env = CRFlattenNormWrapper(rec_env)
+        rec_env = HeatmapVisualizerWrapper(rec_env)
         rec_env = gym.wrappers.RecordVideo(
             rec_env,
             video_folder=self.video_dir,
@@ -492,10 +498,48 @@ class Trainer:
                 state_1, state_2  = self.split_observations(state)
                 
                 with t.no_grad():
-                    action_1, _, _, _ = net_1.get_action_and_value(state_1)
-                    action_2, _, _, _ = net_2.get_action_and_value(state_2)
+                    _, skip_logits_1, deck_logits_1, pos_logits_1 = net_1(state_1)
+                    _, skip_logits_2, deck_logits_2, pos_logits_2 = net_2(state_2)
+
+                    if net_1.invalid_position_mask is not None:
+                        pos_logits_1 = pos_logits_1.masked_fill(net_1.invalid_position_mask, float('-inf'))
+                    if net_2.invalid_position_mask is not None:
+                        pos_logits_2 = pos_logits_2.masked_fill(net_2.invalid_position_mask, float('-inf'))
+
+                    skip_probs_1 = t.sigmoid(skip_logits_1).squeeze(0).cpu().numpy()
+                    deck_probs_1 = F.softmax(deck_logits_1, dim=-1).squeeze(0).cpu().numpy()
+                    pos_logits_np_1 = pos_logits_1.squeeze(0).cpu().numpy()
+                    pos_probs_1  = F.softmax(pos_logits_1, dim=-1).squeeze(0).cpu().numpy()
+
+                    skip_dist_1 = t.distributions.Bernoulli(logits=skip_logits_1)
+                    deck_dist_1 = t.distributions.Categorical(logits=deck_logits_1)
+                    pos_dist_1 = t.distributions.Categorical(logits=pos_logits_1)
+
+                    skip_dist_2 = t.distributions.Bernoulli(logits=skip_logits_2)
+                    deck_dist_2 = t.distributions.Categorical(logits=deck_logits_2)
+                    pos_dist_2 = t.distributions.Categorical(logits=pos_logits_2)
+
+                    action_1 = {
+                        "skip": skip_dist_1.sample().detach(),
+                        "deck_idx": deck_dist_1.sample().detach(),
+                        "position": pos_dist_1.sample().detach(),
+                    }
+                    action_2 = {
+                        "skip": skip_dist_2.sample().detach(),
+                        "deck_idx": deck_dist_2.sample().detach(),
+                        "position": pos_dist_2.sample().detach(),
+                    }
             
                 action = self.join_actions(action_1, action_2)
+                rec_env.env.update(
+                    player_idx=1,
+                    skip_prob=skip_probs_1.item(),
+                    deck_probs=deck_probs_1,
+                    pos_probs=pos_probs_1,
+                    pos_logits=pos_logits_np_1,
+                    action=action_1,
+                    env_action=action,
+                )
 
 
                 if os.environ.get("PROFILE_MODE"):
