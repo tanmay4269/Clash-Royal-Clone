@@ -62,7 +62,7 @@ class Trainer:
 
         tiled_occupancy_grid = np.where(occupancy_grid == 1, 1, 0)[scale//2::scale, scale//2::scale]
         invalid_position_mask = tiled_occupancy_grid.astype(bool).T
-        invalid_position_mask[: self.arena.height//2, :] = True  # other player's half is always invalid
+        invalid_position_mask[self.arena.height//2 :, :] = True  # bottom/opponent half is always invalid in player-1 view
 
         ### CONFIGS ###
         self.cfg = Dict()
@@ -560,23 +560,34 @@ class Trainer:
         else:
             player_2_cards_arr = np.array(obs["player_2_cards"], dtype=np.float32)
 
-        player_1_cards = F.pad(
-            t.tensor(player_1_cards_arr),  # (X, card_dim)
-            (0, 0, 0, self.max_num_objects - player_1_num_cards),         # (N, card_dim)
-            "constant", 0
-        ).unsqueeze(0)
+        position_x_idx, position_y_idx = np.arange(*self.env.flattened_card_space_indices["position"])
 
-        player_2_cards = F.pad(
-            t.tensor(player_2_cards_arr),
-            (0, 0, 0, self.max_num_objects - player_2_num_cards),
-            "constant", 0
-        ).unsqueeze(0)
+        def pad_cards(cards_arr, num_cards):
+            return F.pad(
+                t.tensor(cards_arr),  # (X, card_dim)
+                (0, 0, 0, self.max_num_objects - num_cards),  # (N, card_dim)
+                "constant",
+                0,
+            ).unsqueeze(0)
+
+        def rotate_entities_180(entities):
+            rotated = entities.clone()
+            rotated[..., position_x_idx] *= -1
+            rotated[..., position_y_idx] *= -1
+            return rotated
+
+        player_1_cards = pad_cards(player_1_cards_arr, player_1_num_cards)
+        player_2_cards = pad_cards(player_2_cards_arr, player_2_num_cards)
 
         player_1_crown_towers = t.tensor(np.array(obs["player_1_crown_towers"], dtype=np.float32)).unsqueeze(0)
         player_2_crown_towers = t.tensor(np.array(obs["player_2_crown_towers"], dtype=np.float32)).unsqueeze(0)
 
+        game_completion_fraction = t.tensor(np.array(obs["game_completion_fraction"], dtype=np.float32)).reshape(-1, 1)
+
+        # Network convention: each policy sees itself in player-1 view:
+        # self at the top, opponent at the bottom, with the usual top-left x/y origin.
         obs_1 = {
-            "game_completion_fraction": t.tensor(np.array(obs["game_completion_fraction"], dtype=np.float32)).reshape(-1, 1),
+            "game_completion_fraction": game_completion_fraction,
             "elixirs":                  t.tensor(np.array(obs["player_1_elixirs"], dtype=np.float32)).reshape(-1, 1),
             "my_cards":                 player_1_cards,
             "opponent_cards":           player_2_cards,
@@ -584,67 +595,39 @@ class Trainer:
             "opponent_crown_towers":    player_2_crown_towers,
         }
 
-        # Flipping them is just a 180 degree rotation about the origin
-        # (x, y) -> (width_cell - x, height_cell - y)
-        width_cell  = self.arena.tile_size * self.arena.width
-        height_cell = self.arena.tile_size * self.arena.height
-        position_x_idx, position_y_idx = np.arange(*self.env.flattened_card_space_indices["position"])
-        
-        # Doing this to prevent zero padded entries to falsely invert
-        player_1_cards = t.tensor(player_1_cards_arr)
-        player_2_cards = t.tensor(player_2_cards_arr)
-
-        player_1_cards[..., position_x_idx] = width_cell  - player_1_cards[..., position_x_idx]
-        player_1_cards[..., position_y_idx] = height_cell - player_1_cards[..., position_y_idx]
-
-        player_2_cards[..., position_x_idx] = width_cell  - player_2_cards[..., position_x_idx]
-        player_2_cards[..., position_y_idx] = height_cell - player_2_cards[..., position_y_idx]
-
-        player_1_cards = F.pad(
-            player_1_cards,  # (X, card_dim)
-            (0, 0, 0, self.max_num_objects - player_1_num_cards),  # (N, card_dim)
-            "constant", 0
-        ).unsqueeze(0)
-
-        player_2_cards = F.pad(
-            player_2_cards,
-            (0, 0, 0, self.max_num_objects - player_2_num_cards),
-            "constant", 0
-        ) .unsqueeze(0)
-
-        player_1_crown_towers[..., position_x_idx] = width_cell  - player_1_crown_towers[..., position_x_idx]
-        player_1_crown_towers[..., position_y_idx] = height_cell - player_1_crown_towers[..., position_y_idx]
-
-        player_2_crown_towers[..., position_x_idx] = width_cell  - player_2_crown_towers[..., position_x_idx]
-        player_2_crown_towers[..., position_y_idx] = height_cell - player_2_crown_towers[..., position_y_idx]
-
         obs_2 = {
-            "game_completion_fraction": t.tensor(np.array(obs["game_completion_fraction"], dtype=np.float32)).reshape(-1, 1),
+            "game_completion_fraction": game_completion_fraction,
             "elixirs":                  t.tensor(np.array(obs["player_2_elixirs"], dtype=np.float32)).reshape(-1, 1),
-            "my_cards":                 player_2_cards,
-            "opponent_cards":           player_1_cards,
-            "my_crown_towers":          player_2_crown_towers,
-            "opponent_crown_towers":    player_1_crown_towers,
+            "my_cards":                 rotate_entities_180(player_2_cards),
+            "opponent_cards":           rotate_entities_180(player_1_cards),
+            "my_crown_towers":          rotate_entities_180(player_2_crown_towers),
+            "opponent_crown_towers":    rotate_entities_180(player_1_crown_towers),
         }
 
         return obs_1, obs_2
 
 
     def join_actions(self, action_1, action_2):
-        return {
-            "player_1_skip":     action_1["skip"],
-            "player_1_card_idx": action_1["deck_idx"],
-            "player_1_card_position": (
-                action_1["position"] % self.arena.width,
-                action_1["position"] // self.arena.width
-            ),
+        def scalar_int(value):
+            if hasattr(value, "detach"):
+                return int(value.detach().cpu().item())
+            return int(value)
 
-            "player_2_skip":     action_2["skip"],
-            "player_2_card_idx": action_2["deck_idx"],
-            "player_2_card_position": (
-                self.arena.width  - action_2["position"] % self.arena.width,
-                self.arena.height - action_2["position"] // self.arena.width
-            ),
+        def policy_position_to_xy(action):
+            pos_idx = scalar_int(action["position"])
+            return pos_idx % self.arena.width, pos_idx // self.arena.width
+
+        def rotate_xy_180(x, y):
+            return self.arena.width - 1 - x, self.arena.height - 1 - y
+
+        return {
+            "player_1_skip":          scalar_int(action_1["skip"]),
+            "player_1_card_idx":      scalar_int(action_1["deck_idx"]),
+            "player_1_card_position": policy_position_to_xy(action_1),
+
+            "player_2_skip":          scalar_int(action_2["skip"]),
+            "player_2_card_idx":      scalar_int(action_2["deck_idx"]),
+            "player_2_card_position": rotate_xy_180(*policy_position_to_xy(action_2)),
         }
 
     

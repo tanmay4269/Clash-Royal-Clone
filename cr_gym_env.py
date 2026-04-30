@@ -221,8 +221,8 @@ class ClashRoyaleEnv(gym.Env):
             if action[f"player_{idx}_skip"] == 1:
                 continue
 
-            owner = self.arena.player_side_2 if idx == 1 \
-                else self.arena.player_side_1
+            owner = self.arena.player_side_1 if idx == 1 \
+                else self.arena.player_side_2
 
             x, y = action[f"player_{idx}_card_position"]
             

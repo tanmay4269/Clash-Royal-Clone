@@ -114,14 +114,15 @@ class Arena:
 
         
         # Highlighted cell under the cursor
-        (mouse_x, mouse_y) = pygame.mouse.get_pos()
-        tile_x = mouse_x // self.tile_size
-        tile_y = mouse_y // self.tile_size
+        if pygame.display.get_init():
+            (mouse_x, mouse_y) = pygame.mouse.get_pos()
+            tile_x = mouse_x // self.tile_size
+            tile_y = mouse_y // self.tile_size
 
-        surface = pygame.Surface((self.tile_size, self.tile_size))
-        surface.set_alpha(127)
-        surface.fill((128, 128, 128))
-        screen.blit(surface, (tile_x * self.tile_size, tile_y * self.tile_size))
+            surface = pygame.Surface((self.tile_size, self.tile_size))
+            surface.set_alpha(127)
+            surface.fill((128, 128, 128))
+            screen.blit(surface, (tile_x * self.tile_size, tile_y * self.tile_size))
 
         # HUD: elixir (bottom left) and timer (bottom right)
         if self._font is None:
