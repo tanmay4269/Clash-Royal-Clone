@@ -282,21 +282,23 @@ class ClashRoyaleEnv(gym.Env):
                 delta = cur_health - prev_health  # negative when damage dealt
 
                 # HP delta (shaping)
+                _hp_delta_scale = 1 / 1_000.0
                 if idx == 1:
-                    player_1_reward += delta / 5_000.0
-                    player_2_reward -= delta / 5_000.0
+                    player_1_reward += delta * _hp_delta_scale
+                    player_2_reward -= delta * _hp_delta_scale
                 else:
-                    player_1_reward -= delta / 5_000.0
-                    player_2_reward += delta / 5_000.0
+                    player_1_reward -= delta * _hp_delta_scale
+                    player_2_reward += delta * _hp_delta_scale
 
                 # Tower destruction bonus
+                _tower_distruction_reward = 0.1
                 if prev_health > 0 and cur_health <= 0:
                     if idx == 1:  # P1's tower destroyed → bad for P1
-                        player_1_reward -= 0.5
-                        player_2_reward += 0.5
+                        player_1_reward -= _tower_distruction_reward
+                        player_2_reward += _tower_distruction_reward
                     else:         # P2's tower destroyed → good for P1
-                        player_1_reward += 0.5
-                        player_2_reward -= 0.5
+                        player_1_reward += _tower_distruction_reward
+                        player_2_reward -= _tower_distruction_reward
 
         # 3. Game outcome
         if terminated:
@@ -304,11 +306,11 @@ class ClashRoyaleEnv(gym.Env):
             p2_king_h = float(self._cur_obs["player_2_crown_towers"]["king_tower"]["health"])
 
             if p2_king_h <= 0:    # P1 wins
-                player_1_reward += 5.0
-                player_2_reward -= 5.0
+                player_1_reward += 1.0
+                player_2_reward -= 1.0
             elif p1_king_h <= 0:  # P2 wins
-                player_1_reward -= 5.0
-                player_2_reward += 5.0
+                player_1_reward -= 1.0
+                player_2_reward += 1.0
 
         return player_1_reward, player_2_reward
 
