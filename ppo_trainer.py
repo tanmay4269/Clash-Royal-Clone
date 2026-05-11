@@ -109,7 +109,7 @@ class Trainer:
         self.cfg.network.invalid_position_mask = t.tensor(invalid_position_mask).flatten()
 
         # Buffer Related
-        self.cfg.buffer.gae_gamma = 0.99
+        self.cfg.buffer.gae_gamma = 0.997
         self.cfg.buffer.gae_lambda = 0.95
 
         self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.unwrapped.FIXED_DT * 10)  # Usually 10 to 100 episodes
