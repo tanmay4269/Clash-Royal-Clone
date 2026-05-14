@@ -6,7 +6,7 @@ class ProjectileShooter(Entity):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.projectiles = set()
+        self.projectiles: List = []
 
 
     def render_projectiles(self, screen):
@@ -15,13 +15,9 @@ class ProjectileShooter(Entity):
 
 
     def update_projectiles(self, dt):
-        delete_projectiles = set()
-        for proj in self.projectiles:
-            if not proj.update(dt):
-                delete_projectiles.add(proj)
-
-        while len(delete_projectiles):
-            proj = delete_projectiles.pop()
+        # Snapshot dead projectiles first, then remove — avoids mutating list while iterating
+        dead_projectiles = [proj for proj in self.projectiles if not proj.update(dt)]
+        for proj in dead_projectiles:
             self.projectiles.remove(proj)
             del proj
 
@@ -50,4 +46,4 @@ class ProjectileShooter(Entity):
     def attack_mechanics(self, direction, is_air_target) -> None:
         target_types = EntityType.AIR if is_air_target else set({EntityType.GROUND, EntityType.BUILDING})
         proj = self.get_projectile(direction, target_types)
-        self.projectiles.add(proj)
+        self.projectiles.append(proj)

@@ -16,7 +16,7 @@ class PlayerSide:
         self.elixirs_incriment_cooldown = 3.0
         self._elixir_timer = 0.0
 
-        self.objects = set()  # Add towers once initialised
+        self.objects: List = []  # Add towers once initialised
             # TODO: make a dict instead, but need to change getters and setters
 
 
@@ -39,7 +39,8 @@ class PlayerSide:
 
 
     def add_object(self, obj):
-        self.objects.add(obj)
+        if obj not in self.objects:
+            self.objects.append(obj)
 
 
     def remove_object(self, obj):
@@ -63,9 +64,8 @@ class PlayerSide1(PlayerSide):
         self.princess_tower_1 = PrincessTower(self, 6.5, 3.5, 2, 2)
         self.princess_tower_2 = PrincessTower(self, 6.5, 18 - 3.5, 2, 2)
 
-        self.objects = set({
-            self.king_tower, self.princess_tower_1, self.princess_tower_2
-        })
+        # Deterministic order: king first, then princess_1, princess_2
+        self.objects = [self.king_tower, self.princess_tower_1, self.princess_tower_2]
 
 
 class PlayerSide2(PlayerSide):
@@ -77,6 +77,5 @@ class PlayerSide2(PlayerSide):
         self.princess_tower_1 = PrincessTower(self, 32 - 6.5, 3.5, 2, 2)
         self.princess_tower_2 = PrincessTower(self, 32 - 6.5, 18 - 3.5, 2, 2)
         
-        self.objects = set({
-            self.king_tower, self.princess_tower_1, self.princess_tower_2
-        })
+        # Deterministic order: king first, then princess_1, princess_2
+        self.objects = [self.king_tower, self.princess_tower_1, self.princess_tower_2]

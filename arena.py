@@ -21,8 +21,8 @@ class Arena:
         self.height = 32
 
         self.max_num_objects = 32  # Arbitrary
-        self.objects: Set[Entity] = set()  # Contains all in game objects that have been deployed like buildings, troupes, etc.
-        self.deploy_buffer = set()         # Contains items that haven't deployed yet but need to be rendered
+        self.objects: List[Entity] = []  # Contains all in game objects that have been deployed like buildings, troupes, etc.
+        self.deploy_buffer: List[Entity] = []  # Contains items that haven't deployed yet but need to be rendered
 
         # Occupancy Grid
         #   0 => Unoccupied
@@ -54,8 +54,8 @@ class Arena:
         self.player_side_1.set_opponent(self.player_side_2)
         self.player_side_2.set_opponent(self.player_side_1)
 
-        # Deploying crown towers
-        towers = self.player_side_1.get_objects() | self.player_side_2.get_objects()
+        # Deploying crown towers — use list concat to preserve deterministic order
+        towers = list(self.player_side_1.get_objects()) + list(self.player_side_2.get_objects())
         for obj in towers:
             self.deploy_entity(obj)
 
@@ -189,15 +189,12 @@ class Arena:
 
 
         ### Deploy Buffer Management ###
-        
-        deployed_objs = set()
-        for obj in self.deploy_buffer:
-            if obj.has_deployed(dt):
-                deployed_objs.add(obj)
-        
+
+        # Snapshot which objects have finished deploying (list comprehension = deterministic order)
+        deployed_objs = [obj for obj in self.deploy_buffer if obj.has_deployed(dt)]
         for obj in deployed_objs:
             if len(self.objects) < self.max_num_objects:
-                self.objects.add(obj)
+                self.objects.append(obj)
                 # ! ADD TO PLAYER OBJECTS TOO
             else:
                 print("[WARN: Arena::update] Buffer Management: Can't deploy since max num objects has been reached")
@@ -206,19 +203,15 @@ class Arena:
 
         ### Object Update and Deletion ###
 
-        dead_objs = set()
-        for obj in self.objects:
-            if not obj.update(dt, self.cell_occupancy):
-                dead_objs.add(obj)
-
-        while len(dead_objs):
-            obj = dead_objs.pop()
-
+        # Snapshot dead objects first (list comprehension = deterministic order),
+        # then delete — avoids mutating self.objects while iterating it
+        dead_objs = [obj for obj in self.objects if not obj.update(dt, self.cell_occupancy)]
+        for obj in dead_objs:
             if obj.owner.side_index == 1:
                 self.player_side_1.remove_object(obj)
             elif obj.owner.side_index == 2:
                 self.player_side_2.remove_object(obj)
-            
+
             if obj == self.player_side_1.king_tower:
                 # print("Player 2 won!")
                 return True, False
@@ -275,8 +268,8 @@ class Arena:
         if self.occupy_cells(mask, mask_pos) is False:
             return False
 
-        # 3. Add to self.objects
-        self.deploy_buffer.add(deploy_me)
+        # 3. Add to deploy buffer
+        self.deploy_buffer.append(deploy_me)
 
         # 4. Subtract player's elixirs and return True
         deploy_me.owner.spend_elixirs(deploy_me.deploy_cost)

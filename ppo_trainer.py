@@ -48,6 +48,11 @@ class Trainer:
         tower_distruction_reward=0.5,
         winning_reward=5.0
 ):
+        # Seed first — before ANY CUDA init, gym.make, or network construction
+        self.cfg = Dict()
+        self.cfg.seed = 42
+        self.set_seed(self.cfg.seed)
+
         t.set_default_dtype(t.float32)
 
         if t.cuda.is_available():
@@ -88,9 +93,6 @@ class Trainer:
         invalid_position_mask = tiled_occupancy_grid.astype(bool).T
         invalid_position_mask[self.arena.height//2 :, :] = True  # bottom/opponent half is always invalid in player-1 view
         
-        ### CONFIGS ###
-        self.cfg = Dict()
-        
         datetime_str = time.strftime('%m%d-%H%M%S')
         if run_name:
             self.cfg.run_name = f"{run_name}_{datetime_str}"
@@ -99,9 +101,6 @@ class Trainer:
 
         if self.debug:
             self.cfg.run_name = f"DEBUG_{self.cfg.run_name}"
-
-        self.cfg.seed = 42
-        self.set_seed(self.cfg.seed)
 
         # Network Config
         self.cfg.network.entity_encoder_in_ch = self.env.flat_card_space.shape[0]
@@ -120,7 +119,6 @@ class Trainer:
 
         # Buffer Related
         self.cfg.buffer.gae_gamma = gae_gamma
-        # self.cfg.buffer.gae_gamma = 0.997
 
         self.cfg.buffer.gae_lambda = 0.95
 
@@ -334,7 +332,8 @@ class Trainer:
             pre_update_net = deepcopy(net_1)
 
             # PPO update
-            actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance = \
+            actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance, \
+                pre_clip_grad_norm, critic_weight_norm = \
                 self.ppo_update(buffer, net_1, optimiser_1, global_step)
             
             self.logger.on_ppo_update(global_step, buffer, net_1, initial_net, pre_update_net)
@@ -348,12 +347,17 @@ class Trainer:
 
             if self.wandb_logging:
                 wandb.log({
-                    "actor_loss":         actor_loss,
-                    "critic_loss":        critic_loss,
-                    "entropy":            entropy,
-                    "ratio_mean":         ratio_mean,
-                    "advantage_mean":     advantage_mean,
-                    "explained_variance": explained_variance
+                    "actor_loss":           actor_loss,
+                    "critic_loss":          critic_loss,
+                    "entropy":              entropy,
+                    "ratio_mean":           ratio_mean,
+                    "advantage_mean":       advantage_mean,
+                    "explained_variance":   explained_variance,
+
+                    # Critic instability diagnostics
+                    "critic_instability_diagnostics/pre_clip_grad_norm":  pre_clip_grad_norm,
+                    "critic_instability_diagnostics/critic_weight_norm":  critic_weight_norm,
+                    "critic_instability_diagnostics/value_mean":          buffer.values.mean().item(),
                 }, step=global_step)
 
     
@@ -384,13 +388,16 @@ class Trainer:
         ratio_mean_meter = AverageMeter()
         advantage_mean_meter = AverageMeter()
         explained_variance_meter = AverageMeter()
+        pre_clip_grad_norm_meter = AverageMeter()
+        critic_weight_norm_meter = AverageMeter()
 
         if os.environ.get("PROFILE_MODE"):
             ppo_update_start_time = time.time()
 
         for epoch in range(num_epochs):
             for batch in buffer.get_minibatches(self.cfg.minibatch_size):
-                actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance = \
+                actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance, \
+                    pre_clip_grad_norm, critic_weight_norm = \
                     self.on_batch_update(
                         net,
                         optimiser,
@@ -404,6 +411,8 @@ class Trainer:
                 ratio_mean_meter.add_sample(ratio_mean)
                 advantage_mean_meter.add_sample(advantage_mean)
                 explained_variance_meter.add_sample(explained_variance)
+                pre_clip_grad_norm_meter.add_sample(pre_clip_grad_norm)
+                critic_weight_norm_meter.add_sample(critic_weight_norm)
 
             if epoch % 10 == 0 and self.overfit_mode == 'single-buffer':
                 window = 10 * len(buffer) // self.cfg.minibatch_size
@@ -430,7 +439,9 @@ class Trainer:
             entropy_meter.average(),
             ratio_mean_meter.average(),
             advantage_mean_meter.average(),
-            explained_variance_meter.average()
+            explained_variance_meter.average(),
+            pre_clip_grad_norm_meter.average(),
+            critic_weight_norm_meter.average(),
         )
 
 
@@ -451,10 +462,19 @@ class Trainer:
         if optimize:
             optimiser.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(net.parameters(), self.cfg.grad_clip)
+            pre_clip_grad_norm = nn.utils.clip_grad_norm_(net.parameters(), self.cfg.grad_clip).item()
             optimiser.step()
             if scheduler is not None:
                 scheduler.step()
+        else:
+            pre_clip_grad_norm = 0.0
+
+        # Critic weight norm — tracks if weights are drifting unbounded
+        critic_weight_norm = sum(
+            p.norm() ** 2
+            for name, p in net.named_parameters()
+            if 'critic' in name
+        ).sqrt().item()
 
         explained_variance = 1 - (returns - values).var() / returns.var()
 
@@ -465,6 +485,8 @@ class Trainer:
             ratio.mean().item(),
             advantages.mean().item(),
             explained_variance.item(),
+            pre_clip_grad_norm,
+            critic_weight_norm,
         )
 
 
@@ -501,7 +523,7 @@ class Trainer:
             batch = minibatches[step_idx % len(minibatches)]
             current_lr = temp_optimiser.param_groups[0]["lr"]
 
-            actor_loss, critic_loss, entropy, _, _, _ = self.on_batch_update(
+            actor_loss, critic_loss, entropy, _, _, _, _, _ = self.on_batch_update(
                 temp_net,
                 temp_optimiser,
                 batch,
@@ -758,6 +780,7 @@ class Trainer:
         t.cuda.manual_seed_all(seed)
         t.backends.cudnn.deterministic = True
         t.backends.cudnn.benchmark = False
+        t.use_deterministic_algorithms(True)
 
 
 if __name__ == "__main__":
@@ -771,7 +794,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_lr_tuner", 
         action=argparse.BooleanOptionalAction, 
-        default=True, 
+        default=False, 
         help="Enable or disable LR tuner."
     )
     parser.add_argument(
