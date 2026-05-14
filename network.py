@@ -104,10 +104,10 @@ class ActorCritic(nn.Module):
         trunk_input = t.cat([
             obs["game_completion_fraction"],
             obs["elixirs"],
-            my_crown_tower_embeddings.flatten(start_dim=1),        # (B, 3 * entity_encoder_out_ch)
-            opponent_crown_tower_embeddings.flatten(start_dim=1),  # (B, 3 * entity_encoder_out_ch)
-            masked_mean(my_card_embeddings, obs["my_cards"]),        # (B, entity_encoder_out_ch)
-            masked_mean(opponent_card_embeddings, obs["opponent_cards"]),  # (B, entity_encoder_out_ch)
+            my_crown_tower_embeddings.flatten(start_dim=1),                 # (B, 3 * entity_encoder_out_ch)
+            opponent_crown_tower_embeddings.flatten(start_dim=1),           # (B, 3 * entity_encoder_out_ch)
+            masked_mean(my_card_embeddings, obs["my_cards"]),               # (B, entity_encoder_out_ch)
+            masked_mean(opponent_card_embeddings, obs["opponent_cards"]),   # (B, entity_encoder_out_ch)
         ], dim=-1).to(dtype=t.float32)  # (B, trunk_extra_in_ch + entity_encoder_out_ch)
 
         trunk_out = self.trunk(trunk_input)

@@ -33,7 +33,6 @@ from diagnostics_logger import DiagnosticsLogger
 import wandb
 
 
-
 class Trainer:
     def __init__(
         self, 
@@ -151,7 +150,12 @@ class Trainer:
 
         # Loss
         self.cfg.critic_loss_coef = 0.5
-        self.entropy_loss_coef = 0.01  # TODO: later try linear decay
+        
+        # Entropy
+        self.cfg.entropy_loss_coef_initial = 0.01
+        self.cfg.entropy_loss_coef_final   = 0.001
+
+        self.entropy_loss_coef = self.cfg.entropy_loss_coef_initial
 
         # LR Finder
         self.cfg.lr_tuner.enabled = use_lr_tuner
@@ -162,10 +166,10 @@ class Trainer:
         self.cfg.lr_tuner.max_lr = 1e-1
         self.cfg.lr_tuner.num_steps = 200
         self.cfg.lr_tuner.pick_lr_factor = 0.3
-
-        self.cfg.lr = 3e-4  # fallback
-
+        
         self.lr_tuned = False
+
+        self.learning_rate = 1.5e-4  # default lr
 
         # Misc
         self.cfg.minibatch_size = 2048
@@ -346,14 +350,20 @@ class Trainer:
 
         # Linear Learning Rate Decay
         frac = max(0.0, 1.0 - (global_step / self.cfg.max_steps))
-        current_lr = self.cfg.lr * frac
+        current_lr = self.learning_rate * frac
         for param_group in optimiser.param_groups:
             param_group["lr"] = current_lr
 
+        # Linear Entropy Coefficient Decay
+        self.entropy_loss_coef = self.cfg.entropy_loss_coef_final + \
+            (self.cfg.entropy_loss_coef_initial - self.cfg.entropy_loss_coef_final) * frac
+
+        # 
         num_epochs = self.cfg.k_epochs
         if self.overfit_mode == 'single-buffer':
             num_epochs = 1_000_000
             
+        # 
         actor_loss_meter = AverageMeter()
         critic_loss_meter = AverageMeter()
         entropy_meter = AverageMeter()
@@ -518,7 +528,7 @@ class Trainer:
         for param_group in optimiser.param_groups:
             param_group["lr"] = suggested_lr
 
-        self.cfg.lr = suggested_lr
+        self.learning_rate = suggested_lr
 
         print(f"[lr_finder] min_loss_lr: {min_loss_lr:.3e} | suggested_lr: {suggested_lr:.3e}")
 
@@ -635,7 +645,7 @@ class Trainer:
         if weights:
             network.load_state_dict(t.load(weights, weights_only=True))
 
-        optimiser = optim.Adam(network.parameters(), lr=self.cfg.lr)
+        optimiser = optim.Adam(network.parameters(), lr=self.learning_rate)
 
         return network, optimiser
 
