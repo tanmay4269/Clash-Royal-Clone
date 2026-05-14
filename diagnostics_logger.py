@@ -27,6 +27,14 @@ class DiagnosticsLogger:
         self.buffer_towers_killed_by_p1 = 0
         self.buffer_towers_killed_by_p2 = 0
 
+        # Accumulated episode-level stats for aggregation at PPO update time.
+        # With parallel envs, multiple episodes can end at the same global_step,
+        # so logging each individually causes wandb to silently drop duplicates.
+        # Instead we accumulate and log the mean per PPO update.
+        self._ep_elos = []
+        self._ep_returns = []
+        self._ep_scores = []
+
     def on_step(self, action_1, env):
         # Collect metrics for Player 1
         action_1_cpu = {k: v.cpu().numpy() for k, v in action_1.items()}
@@ -61,11 +69,12 @@ class DiagnosticsLogger:
         self.buffer_towers_killed_by_p1 += towers_killed_by_p1
         self.buffer_towers_killed_by_p2 += towers_killed_by_p2
 
+        self._ep_elos.append(current_elo)
+        self._ep_returns.append(ep_return)
+        self._ep_scores.append(score)
+
         if self.wandb_logging:
             log_dict = {
-                "elo": current_elo,
-                "return": ep_return,
-                "score": score,
                 "game_diagnostics/ep_duration_frames": self.current_ep_steps,
                 "game_diagnostics/avg_elixir_p1": self.current_ep_elixir_sum / max(1, self.current_ep_steps),
                 "action_diagnostics/skip_ratio": self.ep_skips / max(1, self.current_ep_steps),
@@ -92,15 +101,45 @@ class DiagnosticsLogger:
 
         self.reset_episode_stats()
 
+    def on_episode_end_simple(self, terminated, truncated, current_elo, ep_return, score):
+        """
+        Lightweight episode-end accumulator for parallel envs.
+        Does not require direct env access, and does NOT log to wandb immediately.
+
+        With parallel envs, multiple episodes can end within the same global_step
+        tick. Calling wandb.log(..., step=X) multiple times with the same X causes
+        silent overwrites — only the last call survives. Instead, we accumulate
+        stats here and flush them as averages in on_ppo_update().
+        """
+        self.buffer_games_completed += 1
+        if terminated:
+            self.buffer_games_terminated += 1
+        if truncated:
+            self.buffer_games_truncated += 1
+
+        self._ep_elos.append(current_elo)
+        self._ep_returns.append(ep_return)
+        self._ep_scores.append(score)
+
+        self.reset_episode_stats()
+
     def on_ppo_update(self, global_step, buffer, net_curr, net_init, net_prev):
         if not self.wandb_logging:
             self.reset_buffer_stats()
             return
-            
-        # Log buffer specific game_diagnostics
+        
+        # --- Episode-level aggregates (flushed once per PPO update) ---
+        if self._ep_elos:
+            wandb.log({
+                "elo":    self._ep_elos[-1],          # latest ELO (monotonically updated)
+                "return": np.mean(self._ep_returns),  # mean return across all episodes in this buffer
+                "score":  np.mean(self._ep_scores),   # win rate across all episodes in this buffer
+            }, step=global_step)
+
+        # --- Buffer-level game diagnostics ---
         wandb.log({
-            "game_diagnostics/buffer_games_completed": self.buffer_games_completed,
-            "game_diagnostics/buffer_games_truncated": self.buffer_games_truncated,
+            "game_diagnostics/buffer_games_completed":  self.buffer_games_completed,
+            "game_diagnostics/buffer_games_truncated":  self.buffer_games_truncated,
             "game_diagnostics/buffer_games_terminated": self.buffer_games_terminated,
             "game_diagnostics/avg_towers_killed_by_p1": self.buffer_towers_killed_by_p1 / max(1, self.buffer_games_completed),
             "game_diagnostics/avg_towers_killed_by_p2": self.buffer_towers_killed_by_p2 / max(1, self.buffer_games_completed),
@@ -108,7 +147,7 @@ class DiagnosticsLogger:
 
         self.reset_buffer_stats()
 
-        # Compute per head diagnostics
+        # --- Per-head policy diagnostics ---
         with t.no_grad():
             batch = next(iter(buffer.get_minibatches(self.cfg.minibatch_size)))
             states_tensor = batch[0]

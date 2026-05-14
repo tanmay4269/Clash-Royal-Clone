@@ -24,6 +24,7 @@ from network import ActorCritic, BotNet
 import gymnasium as gym
 import cr_gym_env
 from cr_flatten_norm_wrapper import CRFlattenNormWrapper
+from parallel_env import ParallelEnvManager
 
 from rollout_buffer import RolloutBuffer
 from checkpoint_management import *
@@ -46,7 +47,8 @@ class Trainer:
         step_penalty=0.0,
         tower_damage_reward_scale=1/5000.0,
         tower_distruction_reward=0.5,
-        winning_reward=5.0
+        winning_reward=5.0,
+        num_envs=1,
 ):
         # Seed first — before ANY CUDA init, gym.make, or network construction
         self.cfg = Dict()
@@ -69,17 +71,18 @@ class Trainer:
             os.environ["DEBUG_MODE"] = "1"
 
         self.gym_env_name = gym_env_name
+        self.num_envs = num_envs
 
-        self.env = gym.make(
-            self.gym_env_name,
-            step_penalty=step_penalty,
-            tower_damage_reward_scale=tower_damage_reward_scale,
-            tower_distruction_reward=tower_distruction_reward,
-            winning_reward=winning_reward
-        )
-        # self.num_envs = 4
-        # self.env = gym.vector.make(self.gym_env_name, num_envs=self.num_envs, asynchronous=True)
+        self.env_kwargs = {
+            "step_penalty": step_penalty,
+            "tower_damage_reward_scale": tower_damage_reward_scale,
+            "tower_distruction_reward": tower_distruction_reward,
+            "winning_reward": winning_reward,
+        }
 
+        # Reference env — used for metadata (obs space, arena config) and video recording.
+        # Parallel workers run their own independent env instances.
+        self.env = gym.make(self.gym_env_name, **self.env_kwargs)
         self.env = CRFlattenNormWrapper(self.env)
 
         self.arena = self.env.unwrapped.arena
@@ -220,7 +223,7 @@ class Trainer:
     def train(self):
         self.set_seed(self.cfg.seed)
 
-        ep_return = np.zeros(2)
+        N = self.num_envs
         ep_returns = []
 
         global_step = 0
@@ -243,91 +246,142 @@ class Trainer:
         else:
             net_2 = deepcopy(net_1)
 
-        state, _ = self.env.reset(seed=self.cfg.seed)
-        state_1, state_2  = self.split_observations(state)
-        last_done = False
-        
+        # --- Parallel env setup ---
+        if N > 1:
+            penv = ParallelEnvManager(
+                num_envs=N,
+                env_name=self.gym_env_name,
+                env_kwargs=self.env_kwargs,
+                wrapper_cls=CRFlattenNormWrapper,
+            )
+            seeds = [self.cfg.seed + i for i in range(N)]
+            states = penv.reset(seeds)
+        else:
+            penv = None
+            states = [None]  # placeholder
+            state_raw, _ = self.env.reset(seed=self.cfg.seed)
+            states[0] = state_raw
+
+        # Per-env state tracking
+        states_1 = [None] * N  # player 1 obs per env
+        states_2 = [None] * N  # player 2 obs per env
+        ep_return = [np.zeros(2) for _ in range(N)]
+        last_done = [False] * N
+
+        for i in range(N):
+            states_1[i], states_2[i] = self.split_observations(states[i])
+
         self.logger = DiagnosticsLogger(self.cfg, self.wandb_logging)
 
         while global_step < self.cfg.max_steps:
-            buffer = RolloutBuffer(**self.cfg.buffer.to_dict())
+            # One buffer per env — keeps each env's trajectory contiguous for GAE
+            buffers = [RolloutBuffer(**self.cfg.buffer.to_dict()) for _ in range(N)]
 
-            for _ in range(self.cfg.buffer.n_steps):
+            steps_collected = 0
+            while steps_collected < self.cfg.buffer.n_steps:
                 if global_step >= next_video:
                     self.record_episode(global_step, net_1, net_2)
                     next_video += self.video_every_k_global_steps
 
+                # --- Get actions for all envs ---
                 with t.no_grad():
-                    action_1, log_prob_1, entropy_1, value_1 = net_1.get_action_and_value(state_1)
-                    action_2, _, _, _ = net_2.get_action_and_value(state_2) 
+                    actions_1 = [None] * N
+                    log_probs_1 = [None] * N
+                    values_1 = [None] * N
+                    actions_2 = [None] * N
 
-                action = self.join_actions(action_1, action_2)
+                    for i in range(N):
+                        actions_1[i], log_probs_1[i], _, values_1[i] = net_1.get_action_and_value(states_1[i])
+                        actions_2[i], _, _, _ = net_2.get_action_and_value(states_2[i])
 
-                # Collect metrics for Player 1
-                self.logger.on_step(action_1, self.env)
+                # --- Build joined actions ---
+                joined_actions = [self.join_actions(actions_1[i], actions_2[i]) for i in range(N)]
 
-                try:
-                    next_state, reward, terminated, truncated, _ = self.env.step(action)
-                except Exception as e:
-                    print(f"Env step failed: {e}")
+                # --- Step all envs ---
+                if penv is not None:
+                    results = penv.step(joined_actions)
+                else:
+                    # Single env fallback
+                    try:
+                        next_state, reward, terminated, truncated, _ = self.env.step(joined_actions[0])
+                    except Exception as e:
+                        print(f"Env step failed: {e}")
+                        next_state = states[0]
+                        reward = [0.0, 0.0]
+                        terminated = True
+                        truncated = False
+                    results = [(next_state, reward, terminated, truncated)]
 
-                    next_state = state  # stay in place safely
-                    reward = [0.0, 0.0] # neutral fallback
-                    terminated = True
-                    truncated = False
+                # --- Process results from each env ---
+                for i in range(N):
+                    next_state, reward, terminated, truncated = results[i]
+                    done = terminated or truncated
+                    last_done[i] = terminated
 
-                done = terminated or truncated
-                last_done = terminated
+                    if steps_collected < self.cfg.buffer.n_steps:
+                        buffers[i].push(
+                            states_1[i], actions_1[i], log_probs_1[i], 
+                            reward[0], values_1[i], terminated
+                        )
+                        """
+                            If a game ends simply because time ran out (truncated), GAE will set (1 - next_done) to 0. 
+                            This incorrectly forces the value of the final state to 0, making the critic think running out 
+                            of time violently acts as a massive negative return drop.
+                            Solution: PPO should only mask out values if the agent actually "dies" or the game ends artificially.
+                        """
+                        steps_collected += 1
 
-                buffer.push(state_1, action_1, log_prob_1, reward[0], value_1, terminated)
-                """
-                    If a game ends simply because time ran out (truncated), GAE will set (1 - next_done) to 0. 
-                    This incorrectly forces the value of the final state to 0, making the critic think running out 
-                    of time violently acts as a massive negative return drop.
-                    Solution: PPO should only mask out values if the agent actually "dies" or the game ends artificially.
-                """
+                    states[i] = next_state
+                    states_1[i], states_2[i] = self.split_observations(next_state)
 
-                state = next_state
-                state_1, state_2  = self.split_observations(state)
+                    ep_return[i] += np.array(reward)
 
-                ep_return += np.array(reward)
+                    if done:
+                        # TODO: get this from the env instead
+                        score = 0
+                        if ep_return[i][0] > ep_return[i][1]:
+                            score = 1
+                        elif ep_return[i][0] == ep_return[i][1]:
+                            score = 0.5
 
-                if done:
-                    # TODO: get this from the env instead
-                    score = 0
-                    if ep_return[0] > ep_return[1]:
-                        score = 1
-                    elif ep_return[0] == ep_return[1]:
-                        score = 0.5
+                        # ELO update
+                        E_A = 1 / (1 + 10 ** ((opponent_elo - self.current_elo) / self.cfg.elo.scale))
+                        self.current_elo = self.current_elo + self.cfg.elo.k_factor * (score - E_A)
 
-                    # ELO update
-                    E_A = 1 / (1 + 10 ** ((opponent_elo - self.current_elo) / self.cfg.elo.scale))
-                    self.current_elo = self.current_elo + self.cfg.elo.k_factor * (score - E_A)
+                        # Log episode end (diagnostics logger needs env access — we skip per-step
+                        # env-specific logging for parallel envs, but episode-level stats are tracked)
+                        self.logger.on_episode_end_simple(
+                            terminated, truncated,
+                            self.current_elo, ep_return[i][0], score
+                        )
 
-                    self.logger.on_episode_end(
-                        self.env, terminated, truncated, 
-                        self.current_elo, ep_return[0], score, global_step
-                    )
+                        ep_returns.append(ep_return[i].copy())
+                        ep_return[i] = np.zeros(2)
 
-                    ep_returns.append(ep_return)
-                    ep_return = np.zeros(2)
+                        ep_seed = self.cfg.seed
+                        if self.overfit_mode not in ['fixed-opponent', 'vs-random', 'vs-skip', 'vs-scripted']:
+                            opponent_elo = self.checkpoint_manager.load(net_2, self.current_elo)
+                            self.checkpoint_manager.update(net_1, score, self.current_elo)
+                            ep_seed = np.random.randint(0, 2**31)
 
-                    ep_seed = self.cfg.seed
-                    if self.overfit_mode not in ['fixed-opponent', 'vs-random', 'vs-skip', 'vs-scripted']:
-                        opponent_elo = self.checkpoint_manager.load(net_2, self.current_elo)
-                        self.checkpoint_manager.update(net_1, score, self.current_elo)
-                        ep_seed = np.random.randint(0, 2**31)
+                        if penv is not None:
+                            states[i] = penv.reset_single(i, seed=ep_seed)
+                        else:
+                            states[i], _ = self.env.reset(seed=ep_seed)
+                        states_1[i], states_2[i] = self.split_observations(states[i])
+                        last_done[i] = False  # fresh episode start — bootstrap is valid
 
-                    state, _ = self.env.reset(seed=ep_seed)
-                    state_1, state_2  = self.split_observations(state)
-                    last_done = False  # fresh episode start — bootstrap is valid
+                global_step += N
 
-                global_step += 1
-
-            # Bootstrap final value and compute GAE
+            # Compute GAE independently per env — each buffer has a contiguous trajectory
             with t.no_grad():
-                _, _, _, last_value_1 = net_1.get_action_and_value(state_1)
-                buffer.compute_gae(last_value_1, last_done)
+                for i in range(N):
+                    if buffers[i].ptr > 0:
+                        _, _, _, last_val = net_1.get_action_and_value(states_1[i])
+                        buffers[i].compute_gae(last_val, last_done[i])
+
+            # Merge per-env buffers into one for PPO update
+            buffer = RolloutBuffer.merge(buffers)
 
             pre_update_net = deepcopy(net_1)
 
@@ -338,10 +392,17 @@ class Trainer:
             
             self.logger.on_ppo_update(global_step, buffer, net_1, initial_net, pre_update_net)
 
-            buffer.reset()
+            recent = ep_returns[-100:]
+            avg_ep_return = np.mean([r[0] for r in recent]) if recent else float("nan")
+            
+            if os.environ.get("PROFILE_MODE"):
+                delta_time = time.time() - prev_time if 'prev_time' in locals() else 0.0
+                prev_time = time.time()
 
+                print(f"Delta time: {delta_time:.3f} seconds")
+            
             print(
-                f"step {global_step:7d} | avg(last 100 eps): {(np.mean(ep_returns[-100:], axis=0)[0]):10.3f} | "
+                f"step {global_step:7d} | avg(last 100 eps): {avg_ep_return:10.3f} | "
                 f"actor_loss: {actor_loss:7.3f} | critic_loss: {critic_loss:7.3f} | entropy: {entropy:.3f}"
             )
 
@@ -359,6 +420,8 @@ class Trainer:
                     "critic_instability_diagnostics/critic_weight_norm":  critic_weight_norm,
                     "critic_instability_diagnostics/value_mean":          buffer.values.mean().item(),
                 }, step=global_step)
+
+            buffer = None  # free merged buffer
 
     
     def ppo_update(self, buffer, net, optimiser, global_step=0):
@@ -815,6 +878,12 @@ if __name__ == "__main__":
         action="store_true", 
         help="Enable debug mode."
     )
+    parser.add_argument(
+        "--num_envs",
+        type=int,
+        default=1,
+        help="Number of parallel env workers for rollout collection."
+    )
     
     # RL Hyperparameters
     parser.add_argument(
@@ -863,7 +932,8 @@ if __name__ == "__main__":
         step_penalty=args.step_penalty,
         tower_damage_reward_scale=args.tower_damage_reward_scale,
         tower_distruction_reward=args.tower_distruction_reward,
-        winning_reward=args.winning_reward
+        winning_reward=args.winning_reward,
+        num_envs=args.num_envs,
     )
 
     trainer.train()

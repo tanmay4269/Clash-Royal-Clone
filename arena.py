@@ -173,6 +173,8 @@ class Arena:
                     if overlap.x < 0 or overlap.y < 0:
                         continue
 
+                    if delta.length_squared() < 1e-6:
+                        delta = Vector2(0.1, 0.1)  # nudge apart when perfectly overlapping
                     force = -delta.normalize() * overlap.length() * Troop.COLLISION_COEF
                     obj_j.apply_force(force)
                 else: 
@@ -183,6 +185,8 @@ class Arena:
                     if overlap < 0:
                         continue
 
+                    if delta.length_squared() < 1e-6:
+                        delta = Vector2(0.1, 0.1)  # nudge apart when perfectly overlapping
                     force = delta.normalize() * overlap * Troop.COLLISION_COEF
                     obj_i.apply_force(force)
                     obj_j.apply_force(-force)

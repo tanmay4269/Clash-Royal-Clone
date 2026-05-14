@@ -307,7 +307,6 @@ class ClashRoyaleEnv(gym.Env):
 
         # 3. Game outcome
         if terminated:
-            print("termination reward")
             p1_king_h = float(self._cur_obs["player_1_crown_towers"]["king_tower"]["health"])
             p2_king_h = float(self._cur_obs["player_2_crown_towers"]["king_tower"]["health"])
 

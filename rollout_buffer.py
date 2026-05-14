@@ -48,10 +48,11 @@ class RolloutBuffer:
 
     def compute_gae(self, last_value, last_done):
         """last_value: float, last_done: float -> None (fills self.advantages, self.returns)"""
+        n = self.ptr  # Use actual filled count, not pre-allocated size
         advantage = 0.0
 
-        for i in range(self.n_steps - 1, -1, -1):
-            if i == self.n_steps - 1:
+        for i in range(n - 1, -1, -1):
+            if i == n - 1:
                 next_value = last_value
                 next_done = last_done
             else:
@@ -64,14 +65,15 @@ class RolloutBuffer:
             self.advantages[i] = advantage
 
         # returns BEFORE normalizing advantages
-        self.returns = self.advantages + self.values
+        self.returns[:n] = self.advantages[:n] + self.values[:n]
 
 
     def get_minibatches(self, batch_size):
         """batch_size: int -> yields (states, actions, old_log_probs, advantages, returns) as torch tensors"""
-        indices = np.random.permutation(self.n_steps)
+        n = self.ptr  # Use actual filled count
+        indices = np.random.permutation(n)
 
-        for start in range(0, self.n_steps - batch_size + 1, batch_size):
+        for start in range(0, n - batch_size + 1, batch_size):
             batch_idx = indices[start : start + batch_size]
 
             # Per-minibatch advantage normalization
@@ -85,6 +87,38 @@ class RolloutBuffer:
                 mb_advantages,
                 self.returns[batch_idx],
             )
+
+
+    @classmethod
+    def merge(cls, buffers):
+        """
+        Merge multiple per-env buffers (each with correct per-env GAE) 
+        into a single buffer for the PPO update.
+        """
+        filled = [b for b in buffers if b.ptr > 0]
+        total = sum(b.ptr for b in filled)
+
+        # Create a shell buffer — we'll overwrite its pre-allocated tensors
+        merged = cls(
+            n_steps=total, 
+            gae_gamma=filled[0].gae_gamma, 
+            gae_lambda=filled[0].gae_lambda
+        )
+
+        merged.states     = t.cat([b.states[:b.ptr]     for b in filled], dim=0)
+        merged.actions    = t.cat([b.actions[:b.ptr]     for b in filled], dim=0)
+        merged.log_probs  = t.cat([b.log_probs[:b.ptr]  for b in filled])
+        merged.rewards    = t.cat([b.rewards[:b.ptr]     for b in filled])
+        merged.values     = t.cat([b.values[:b.ptr]      for b in filled])
+        merged.dones      = t.cat([b.dones[:b.ptr]       for b in filled])
+        merged.advantages = t.cat([b.advantages[:b.ptr]  for b in filled])
+        merged.returns    = t.cat([b.returns[:b.ptr]     for b in filled])
+
+        merged.ptr = total
+        merged.state_shapes  = filled[0].state_shapes
+        merged.action_shapes = filled[0].action_shapes
+
+        return merged
 
 
     def flatten_dict(self, data, cache_attr):
@@ -120,7 +154,7 @@ class RolloutBuffer:
 
 
     def __len__(self):
-        return self.n_steps
+        return self.ptr
 
     
     def reset(self):
