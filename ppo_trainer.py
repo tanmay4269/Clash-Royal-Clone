@@ -41,7 +41,12 @@ class Trainer:
         use_lr_tuner=True, 
         overfit_mode=None, 
         wandb_logging=True, 
-        debug=False
+        debug=False,
+        gae_gamma=0.99,
+        step_penalty=0.0,
+        tower_damage_reward_scale=1/5000.0,
+        tower_distruction_reward=0.5,
+        winning_reward=5.0
 ):
         t.set_default_dtype(t.float32)
 
@@ -60,7 +65,13 @@ class Trainer:
 
         self.gym_env_name = gym_env_name
 
-        self.env = gym.make(self.gym_env_name)
+        self.env = gym.make(
+            self.gym_env_name,
+            step_penalty=step_penalty,
+            tower_damage_reward_scale=tower_damage_reward_scale,
+            tower_distruction_reward=tower_distruction_reward,
+            winning_reward=winning_reward
+        )
         # self.num_envs = 4
         # self.env = gym.vector.make(self.gym_env_name, num_envs=self.num_envs, asynchronous=True)
 
@@ -108,7 +119,9 @@ class Trainer:
         self.cfg.network.invalid_position_mask = t.tensor(invalid_position_mask).flatten()
 
         # Buffer Related
-        self.cfg.buffer.gae_gamma = 0.997
+        self.cfg.buffer.gae_gamma = gae_gamma
+        # self.cfg.buffer.gae_gamma = 0.997
+
         self.cfg.buffer.gae_lambda = 0.95
 
         self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.unwrapped.FIXED_DT * 10)  # Usually 10 to 100 episodes
@@ -153,7 +166,8 @@ class Trainer:
         
         # Entropy
         self.cfg.entropy_loss_coef_initial = 0.01
-        self.cfg.entropy_loss_coef_final   = 0.001
+        self.cfg.entropy_loss_coef_final   = 0.01
+        # self.cfg.entropy_loss_coef_final   = 0.001
 
         self.entropy_loss_coef = self.cfg.entropy_loss_coef_initial
 
@@ -778,6 +792,41 @@ if __name__ == "__main__":
         action="store_true", 
         help="Enable debug mode."
     )
+    
+    # RL Hyperparameters
+    parser.add_argument(
+        "--gae_gamma", 
+        type=float, 
+        default=0.99, 
+        help="Discount factor (gamma) for GAE."
+    )
+    
+    # Reward shaping
+    parser.add_argument(
+        "--step_penalty", 
+        type=float, 
+        default=0.0, 
+        help="Penalty applied at each step."
+    )
+    parser.add_argument(
+        "--tower_damage_reward_scale", 
+        type=float, 
+        default=2e-4, 
+        help="Scale for tower damage reward."
+    )
+    parser.add_argument(
+        "--tower_distruction_reward", 
+        type=float, 
+        default=0.5, 
+        help="Reward for destroying a tower."
+    )
+    parser.add_argument(
+        "--winning_reward", 
+        type=float, 
+        default=5.0, 
+        help="Reward for winning the game."
+    )
+
     args = parser.parse_args()
 
     trainer = Trainer(
@@ -786,7 +835,12 @@ if __name__ == "__main__":
         use_lr_tuner=args.use_lr_tuner,
         overfit_mode=args.overfit_mode,
         wandb_logging=args.wandb_logging,
-        debug=args.debug
+        debug=args.debug,
+        gae_gamma=args.gae_gamma,
+        step_penalty=args.step_penalty,
+        tower_damage_reward_scale=args.tower_damage_reward_scale,
+        tower_distruction_reward=args.tower_distruction_reward,
+        winning_reward=args.winning_reward
     )
 
     trainer.train()

@@ -20,7 +20,14 @@ register(
 class ClashRoyaleEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
-    def __init__(self, render_mode=None):
+    def __init__(
+        self, 
+        render_mode=None,
+        step_penalty=0.0,
+        tower_damage_reward_scale=1/5000.0,
+        tower_distruction_reward=0.5,
+        winning_reward=5.0
+    ):
         self.arena = Arena()
 
         ### Observation Space ###
@@ -96,6 +103,13 @@ class ClashRoyaleEnv(gym.Env):
             "player_2_card_idx": spaces.Discrete(self.NUM_CARDS_IN_DECK),
             "player_2_card_position": position_space,
         })
+
+        ### Rewards ###
+        self.step_penalty = step_penalty
+        self.tower_damage_reward_scale = tower_damage_reward_scale
+        self.tower_distruction_reward = tower_distruction_reward
+        self.winning_reward = winning_reward
+
 
         ### Helpers ###
         assert render_mode is None or render_mode in self.metadata["render_modes"]
@@ -259,14 +273,12 @@ class ClashRoyaleEnv(gym.Env):
 
 
     def _get_reward(self, prev_obs, terminated=False, truncated=False):
-        player_1_reward, player_2_reward = -0.001, -0.001  # Step penalty
+        player_1_reward, player_2_reward = self.step_penalty, self.step_penalty
         
         if prev_obs is None:
             return player_1_reward, player_2_reward
 
         # 1. Tower HP change (shaping) + 2. Tower destruction bonus
-        _hp_delta_scale = 1 / EntityRegistry.aggregate("damage")["max"] * 0.00023
-        _tower_distruction_reward = 1.5
         for idx in [1, 2]:
             cur_dict  = self._cur_obs[f"player_{idx}_crown_towers"]
             prev_dict = prev_obs[f"player_{idx}_crown_towers"]
@@ -278,34 +290,33 @@ class ClashRoyaleEnv(gym.Env):
 
                 # HP delta (shaping)
                 if idx == 1:
-                    player_1_reward += delta * _hp_delta_scale
-                    player_2_reward -= delta * _hp_delta_scale
+                    player_1_reward += delta * self.tower_damage_reward_scale
+                    player_2_reward -= delta * self.tower_damage_reward_scale
                 else:
-                    player_1_reward -= delta * _hp_delta_scale
-                    player_2_reward += delta * _hp_delta_scale
+                    player_1_reward -= delta * self.tower_damage_reward_scale
+                    player_2_reward += delta * self.tower_damage_reward_scale
 
                 # Tower destruction bonus
                 if prev_health > 0 and cur_health <= 0:
                     if idx == 1:  # P1's tower destroyed → bad for P1
-                        player_1_reward -= _tower_distruction_reward
-                        player_2_reward += _tower_distruction_reward
+                        player_1_reward -= self.tower_distruction_reward
+                        player_2_reward += self.tower_distruction_reward
                     else:         # P2's tower destroyed → good for P1
-                        player_1_reward += _tower_distruction_reward
-                        player_2_reward -= _tower_distruction_reward
+                        player_1_reward += self.tower_distruction_reward
+                        player_2_reward -= self.tower_distruction_reward
 
         # 3. Game outcome
-        _winning_reward = 5.0
         if terminated:
             print("termination reward")
             p1_king_h = float(self._cur_obs["player_1_crown_towers"]["king_tower"]["health"])
             p2_king_h = float(self._cur_obs["player_2_crown_towers"]["king_tower"]["health"])
 
             if p2_king_h <= 0:    # P1 wins
-                player_1_reward += _winning_reward
-                player_2_reward -= _winning_reward
+                player_1_reward += self.winning_reward
+                player_2_reward -= self.winning_reward
             elif p1_king_h <= 0:  # P2 wins
-                player_1_reward -= _winning_reward
-                player_2_reward += _winning_reward
+                player_1_reward -= self.winning_reward
+                player_2_reward += self.winning_reward
 
         return player_1_reward, player_2_reward
 
