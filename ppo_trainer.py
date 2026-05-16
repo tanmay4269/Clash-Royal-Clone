@@ -43,6 +43,7 @@ class Trainer:
         overfit_mode=None, 
         wandb_logging=True, 
         debug=False,
+        profile=False,
         gae_gamma=0.99,
         step_penalty=0.0,
         tower_damage_reward_scale=1/5000.0,
@@ -69,6 +70,8 @@ class Trainer:
         self.debug = debug or bool(os.environ.get("DEBUG_MODE"))
         if self.debug:
             os.environ["DEBUG_MODE"] = "1"
+
+        self.profile = profile
 
         self.gym_env_name = gym_env_name
         self.num_envs = num_envs
@@ -273,9 +276,17 @@ class Trainer:
 
         self.logger = DiagnosticsLogger(self.cfg, self.wandb_logging)
 
+        profile_update_count = 0
+        max_updates = 2 if self.profile else self.cfg.max_steps  # sentinel reused below
+
         while global_step < self.cfg.max_steps:
             # One buffer per env — keeps each env's trajectory contiguous for GAE
             buffers = [RolloutBuffer(**self.cfg.buffer.to_dict()) for _ in range(N)]
+
+            # --- Profile: buffer collection timing ---
+            _is_profile_update = self.profile and (profile_update_count == 1)
+            _buf_collect_start = time.perf_counter() if _is_profile_update else None
+            _frame_times: list[float] = []
 
             steps_collected = 0
             while steps_collected < self.cfg.buffer.n_steps:
@@ -298,6 +309,7 @@ class Trainer:
                 joined_actions = [self.join_actions(actions_1[i], actions_2[i]) for i in range(N)]
 
                 # --- Step all envs ---
+                _frame_t0 = time.perf_counter() if _is_profile_update else None
                 if penv is not None:
                     results = penv.step(joined_actions)
                 else:
@@ -311,6 +323,8 @@ class Trainer:
                         terminated = True
                         truncated = False
                     results = [(next_state, reward, terminated, truncated)]
+                if _is_profile_update:
+                    _frame_times.append(time.perf_counter() - _frame_t0)
 
                 # --- Process results from each env ---
                 for i in range(N):
@@ -374,32 +388,52 @@ class Trainer:
                 global_step += N
 
             # Compute GAE independently per env — each buffer has a contiguous trajectory
+            _gae_t0 = time.perf_counter() if _is_profile_update else None
             with t.no_grad():
                 for i in range(N):
                     if buffers[i].ptr > 0:
                         _, _, _, last_val = net_1.get_action_and_value(states_1[i])
                         buffers[i].compute_gae(last_val, last_done[i])
+            _gae_time = (time.perf_counter() - _gae_t0) if _is_profile_update else None
 
             # Merge per-env buffers into one for PPO update
             buffer = RolloutBuffer.merge(buffers)
+
+            # --- Profile: print buffer collection stats ---
+            if _is_profile_update:
+                _buf_total = time.perf_counter() - _buf_collect_start
+                _n_frames = len(_frame_times)
+                print("\n" + "="*60)
+                print("[PROFILE] Buffer collection stats (update 2/2)")
+                print(f"  Total collection time : {_buf_total:.3f}s")
+                print(f"  Steps collected       : {steps_collected}")
+                print(f"  Time per step         : {_buf_total / max(steps_collected, 1) * 1000:.3f}ms")
+                print(f"  Env frames timed      : {_n_frames}")
+                if _frame_times:
+                    print(f"  Avg frame step time   : {np.mean(_frame_times)*1000:.3f}ms")
+                    print(f"  Min frame step time   : {np.min(_frame_times)*1000:.3f}ms")
+                    print(f"  Max frame step time   : {np.max(_frame_times)*1000:.3f}ms")
+                    print(f"  P95 frame step time   : {np.percentile(_frame_times, 95)*1000:.3f}ms")
+                print(f"  GAE compute time      : {_gae_time*1000:.3f}ms")
+                print("="*60)
 
             pre_update_net = deepcopy(net_1)
 
             # PPO update
             actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance, \
                 pre_clip_grad_norm, critic_weight_norm = \
-                self.ppo_update(buffer, net_1, optimiser_1, global_step)
+                self.ppo_update(buffer, net_1, optimiser_1, global_step,
+                                profile=_is_profile_update)
             
             self.logger.on_ppo_update(global_step, buffer, net_1, initial_net, pre_update_net)
 
+            profile_update_count += 1
+            if self.profile and profile_update_count >= 2:
+                print("\n[PROFILE] 2 PPO updates complete — exiting.")
+                break
+
             recent = ep_returns[-100:]
             avg_ep_return = np.mean([r[0] for r in recent]) if recent else float("nan")
-            
-            if os.environ.get("PROFILE_MODE"):
-                delta_time = time.time() - prev_time if 'prev_time' in locals() else 0.0
-                prev_time = time.time()
-
-                print(f"Delta time: {delta_time:.3f} seconds")
             
             print(
                 f"step {global_step:7d} | avg(last 100 eps): {avg_ep_return:10.3f} | "
@@ -424,7 +458,7 @@ class Trainer:
             buffer = None  # free merged buffer
 
     
-    def ppo_update(self, buffer, net, optimiser, global_step=0):
+    def ppo_update(self, buffer, net, optimiser, global_step=0, profile=False):
         if self.cfg.lr_tuner.enabled and not self.lr_tuned:
             self.lr_finder(buffer, net, optimiser)
             self.lr_tuned = True
@@ -439,12 +473,10 @@ class Trainer:
         self.entropy_loss_coef = self.cfg.entropy_loss_coef_final + \
             (self.cfg.entropy_loss_coef_initial - self.cfg.entropy_loss_coef_final) * frac
 
-        # 
         num_epochs = self.cfg.k_epochs
         if self.overfit_mode == 'single-buffer':
             num_epochs = 1_000_000
-            
-        # 
+
         actor_loss_meter = AverageMeter()
         critic_loss_meter = AverageMeter()
         entropy_meter = AverageMeter()
@@ -454,10 +486,12 @@ class Trainer:
         pre_clip_grad_norm_meter = AverageMeter()
         critic_weight_norm_meter = AverageMeter()
 
-        if os.environ.get("PROFILE_MODE"):
-            ppo_update_start_time = time.time()
+        ppo_t0 = time.perf_counter() if profile else None
+        epoch_times: list[float] = []
 
         for epoch in range(num_epochs):
+            epoch_t0 = time.perf_counter() if profile else None
+
             for batch in buffer.get_minibatches(self.cfg.minibatch_size):
                 actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance, \
                     pre_clip_grad_norm, critic_weight_norm = \
@@ -477,6 +511,9 @@ class Trainer:
                 pre_clip_grad_norm_meter.add_sample(pre_clip_grad_norm)
                 critic_weight_norm_meter.add_sample(critic_weight_norm)
 
+            if profile:
+                epoch_times.append(time.perf_counter() - epoch_t0)
+
             if epoch % 10 == 0 and self.overfit_mode == 'single-buffer':
                 window = 10 * len(buffer) // self.cfg.minibatch_size
                 _log = {
@@ -492,9 +529,23 @@ class Trainer:
                     wandb.log(_log, step=epoch)
                 print(f"Epoch {epoch:7d} | " + " | ".join([f"{k}: {v:.3f}" for k, v in _log.items()]))
 
-        if os.environ.get("PROFILE_MODE"):
-            ppo_update_end_time = time.time()
-            print(f"PPO update time: {ppo_update_end_time - ppo_update_start_time:.3f} seconds")
+        if profile:
+            ppo_total = time.perf_counter() - ppo_t0
+            n_epochs = len(epoch_times)
+            print("\n" + "-"*60)
+            print("[PROFILE] PPO update stats (update 2/2)")
+            print(f"  k_epochs              : {n_epochs}")
+            print(f"  Total PPO update time : {ppo_total:.3f}s")
+            print(f"  Avg time per epoch    : {np.mean(epoch_times)*1000:.3f}ms")
+            print(f"  Min epoch time        : {np.min(epoch_times)*1000:.3f}ms")
+            print(f"  Max epoch time        : {np.max(epoch_times)*1000:.3f}ms")
+            print(f"  Minibatch size        : {self.cfg.minibatch_size}")
+            print(f"  Buffer size           : {len(buffer)}")
+            n_batches = max(len(buffer) // self.cfg.minibatch_size, 1)
+            print(f"  Batches per epoch     : {n_batches}")
+            if epoch_times:
+                print(f"  Avg time per batch    : {np.mean(epoch_times)/n_batches*1000:.3f}ms")
+            print("-"*60 + "\n")
 
         return (
             actor_loss_meter.average(),
@@ -649,9 +700,6 @@ class Trainer:
         state, _ = rec_env.reset()
         ep_return = np.zeros(2)
 
-        if os.environ.get("PROFILE_MODE"):
-            env_step_times = []
-
         try:
             while True:
                 state_1, state_2  = self.split_observations(state)
@@ -701,15 +749,7 @@ class Trainer:
                 )
 
 
-                if os.environ.get("PROFILE_MODE"):
-                    env_step_start_time = time.time()
-                
                 state, reward, terminated, truncated, _ = rec_env.step(action)
-                
-                if os.environ.get("PROFILE_MODE"):
-                    env_step_end_time = time.time()
-                    env_step_times.append(env_step_end_time - env_step_start_time)
-            
                 ep_return += np.array(reward)
 
                 if terminated or truncated:
@@ -719,10 +759,6 @@ class Trainer:
             print(e)
         
         rec_env.close()
-
-        if os.environ.get("PROFILE_MODE"):
-            print(f"[video] Average env step time: {np.mean(env_step_times):.3f} seconds")
-        
         print(f"[video] step {step}:\t return: {ep_return}")
         
         if self.wandb_logging:
@@ -879,6 +915,11 @@ if __name__ == "__main__":
         help="Enable debug mode."
     )
     parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Run 2 PPO updates and print detailed timing stats on the 2nd (buffer collection, frame step, GAE, PPO). Exits after."
+    )
+    parser.add_argument(
         "--num_envs",
         type=int,
         default=1,
@@ -928,6 +969,7 @@ if __name__ == "__main__":
         overfit_mode=args.overfit_mode,
         wandb_logging=args.wandb_logging,
         debug=args.debug,
+        profile=args.profile,
         gae_gamma=args.gae_gamma,
         step_penalty=args.step_penalty,
         tower_damage_reward_scale=args.tower_damage_reward_scale,
