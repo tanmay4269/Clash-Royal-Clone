@@ -1,6 +1,9 @@
 import torch as t
 import torch.nn as nn
 
+from utils import EntityRegistry
+from entities.troops import Knight, Giant, MiniPEKKA
+
 
 class ActorCritic(nn.Module):
     def __init__(
@@ -19,6 +22,7 @@ class ActorCritic(nn.Module):
         position_space_height,
 
         invalid_position_mask=None,
+        max_elixirs=10,
     ):
         super().__init__()
 
@@ -27,6 +31,12 @@ class ActorCritic(nn.Module):
         self.position_space_height = position_space_height
         
         self.invalid_position_mask = invalid_position_mask
+        self.max_elixirs = max_elixirs
+
+        # Deck order must match cr_gym_env.step(): idx 0=Knight, 1=Giant, 2=MiniPEKKA
+        _deck_classes = [Knight, Giant, MiniPEKKA]
+        _costs = [EntityRegistry._dummy_instances[cls.__name__].deploy_cost for cls in _deck_classes]
+        self.register_buffer("deck_deploy_costs", t.tensor(_costs, dtype=t.float32))
 
 
         self.entity_encoder = nn.Sequential(
@@ -132,16 +142,35 @@ class ActorCritic(nn.Module):
         obs: same as that taken by self.forward
         invalid_deck_mask: based on elixir or something more realistic like CR's random sampling in the deck
         invalid_position_mask: just your half of the arena is deployable into
+
+        Elixir masking (sampling only, action is None):
+          - Cards whose deploy cost exceeds current elixirs are masked to -inf.
+          - If ALL deck cards are unaffordable, skip is forced (skip_logits → +inf)
+            so the agent never wastes an action on a card it can't play.
         """
         value, skip_logits, deck_logits, pos_logits = self(obs)
 
+        # --- Static masks (always applied) ---
         if invalid_deck_mask is not None:
             deck_logits = deck_logits.masked_fill(invalid_deck_mask, float('-inf'))
         if invalid_position_mask is not None:
             pos_logits = pos_logits.masked_fill(invalid_position_mask, float('-inf'))
         if self.invalid_position_mask is not None:
             pos_logits = pos_logits.masked_fill(self.invalid_position_mask, float('-inf'))
-        
+
+        # Elixir mask — sampling only so stored log-probs stay consistent during PPO re-evaluation.
+        if action is None:
+            raw_elixirs = (obs["elixirs"] + 1.0) / 2.0 * self.max_elixirs  # (B, 1)
+            elixir_mask = self.deck_deploy_costs.unsqueeze(0) > raw_elixirs  # (B, num_cards)
+            deck_logits = deck_logits.masked_fill(elixir_mask, float('-inf'))
+
+            all_masked = elixir_mask.all(dim=-1)  # (B,) — can't afford anything
+            if all_masked.any():
+                # Use large finite value, NOT inf: Bernoulli(logits=inf).log_prob() → NaN.
+                skip_logits = skip_logits.masked_fill(all_masked, 20.0)
+                # Zero out fully-masked rows so Categorical doesn't receive all-inf logits.
+                deck_logits = deck_logits.masked_fill(all_masked.unsqueeze(-1), 0.0)
+
         skip_dist = t.distributions.Bernoulli(logits=skip_logits)
         deck_dist = t.distributions.Categorical(logits=deck_logits)
         pos_dist  = t.distributions.Categorical(logits=pos_logits)
@@ -160,14 +189,17 @@ class ActorCritic(nn.Module):
         deck_log_prob = deck_dist.log_prob(action_deck)
         pos_log_prob  = pos_dist.log_prob(action_pos)
 
-        log_prob = skip_log_prob + (1.0 - action_skip) * (deck_log_prob + pos_log_prob)
+        # Use where instead of multiplication: 0.0 * -inf = NaN in PyTorch.
+        # When skipping, deck/pos choices are irrelevant — their log_probs are 0.
+        is_skip = action_skip.bool()
+        log_prob = skip_log_prob + t.where(is_skip, t.zeros_like(deck_log_prob), deck_log_prob + pos_log_prob)
 
         # Entropy
         skip_entropy = skip_dist.entropy()
         deck_entropy = deck_dist.entropy()
         pos_entropy  = pos_dist.entropy()
 
-        entropy = skip_entropy + (1.0 - action_skip) * (deck_entropy + pos_entropy)
+        entropy = skip_entropy + t.where(is_skip, t.zeros_like(deck_entropy), deck_entropy + pos_entropy)
 
         action = {
             "skip": action_skip.detach(), 

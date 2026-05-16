@@ -1,6 +1,7 @@
 **/__pycache__
 .tmp
 tmp/
+saved-videos
 videos
 wandb
 checkpoints
