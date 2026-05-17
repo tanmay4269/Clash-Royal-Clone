@@ -157,39 +157,69 @@ class Arena:
         # Makes a reasonable simplifying assumption that buildings are rects and troops are circles
         # TODO: Maybe much later I implement spacial proximity based approach. If things lag, this could be an optimisation
         # TODO: Put this in another method
-        for obj_i in self.objects:
-            for obj_j in self.objects:
-                if obj_i == obj_j:
-                    continue
+        for i, obj_i in enumerate(self.objects):
+            for j in range(i + 1, len(self.objects)):
+                obj_j = self.objects[j]
 
-                if not isinstance(obj_j, Troop):
-                    continue
-
-                if isinstance(obj_i, Building):
-                    # Building-troop collision
-                    delta = obj_i.position - obj_j.position
-                    overlap = (obj_i.size / 2 + Vector2(obj_j.size, obj_j.size)) - Vector2(abs(delta.x), abs(delta.y))
-
-                    if overlap.x < 0 or overlap.y < 0:
+                # Troop-Troop Collision
+                if isinstance(obj_i, Troop) and isinstance(obj_j, Troop):
+                    dx = obj_i.position.x - obj_j.position.x
+                    dy = obj_i.position.y - obj_j.position.y
+                    dist_sq = dx**2 + dy**2
+                    rad_sum = obj_i.size + obj_j.size
+                    
+                    if dist_sq >= rad_sum**2:
                         continue
+                        
+                    dist = dist_sq**0.5
+                    overlap = rad_sum - dist
+                    if dist_sq < 1e-6:
+                        dx, dy, dist = 0.1, 0.1, 0.1414
+                        
+                    fx = (dx / dist) * overlap * Troop.COLLISION_COEF
+                    fy = (dy / dist) * overlap * Troop.COLLISION_COEF
+                    
+                    obj_i.apply_force(Vector2(fx, fy))
+                    obj_j.apply_force(Vector2(-fx, -fy))
 
-                    if delta.length_squared() < 1e-6:
-                        delta = Vector2(0.1, 0.1)  # nudge apart when perfectly overlapping
-                    force = -delta.normalize() * overlap.length() * Troop.COLLISION_COEF
-                    obj_j.apply_force(force)
-                else: 
-                    # Troop-troop collision
-                    delta = obj_i.position - obj_j.position
-                    overlap = (obj_i.size + obj_j.size) - delta.length()
-
-                    if overlap < 0:
+                # Building-Troop Collision
+                elif isinstance(obj_i, Building) and isinstance(obj_j, Troop):
+                    dx = obj_i.position.x - obj_j.position.x
+                    dy = obj_i.position.y - obj_j.position.y
+                    ox = (obj_i.size / 2 + obj_j.size) - abs(dx)
+                    oy = (obj_i.size / 2 + obj_j.size) - abs(dy)
+                    
+                    if ox < 0 or oy < 0:
                         continue
+                        
+                    dist_sq = dx**2 + dy**2
+                    dist = dist_sq**0.5 if dist_sq >= 1e-6 else 0.1414
+                    dx, dy = (dx, dy) if dist_sq >= 1e-6 else (0.1, 0.1)
+                        
+                    overlap_len = (ox**2 + oy**2)**0.5
+                    fx = -(dx / dist) * overlap_len * Troop.COLLISION_COEF
+                    fy = -(dy / dist) * overlap_len * Troop.COLLISION_COEF
+                    obj_j.apply_force(Vector2(fx, fy))
+                    
+                # Troop-Building Collision (swapped)
+                elif isinstance(obj_i, Troop) and isinstance(obj_j, Building):
+                    dx = obj_j.position.x - obj_i.position.x
+                    dy = obj_j.position.y - obj_i.position.y
+                    ox = (obj_j.size / 2 + obj_i.size) - abs(dx)
+                    oy = (obj_j.size / 2 + obj_i.size) - abs(dy)
+                    
+                    if ox < 0 or oy < 0:
+                        continue
+                        
+                    dist_sq = dx**2 + dy**2
+                    dist = dist_sq**0.5 if dist_sq >= 1e-6 else 0.1414
+                    dx, dy = (dx, dy) if dist_sq >= 1e-6 else (0.1, 0.1)
+                        
+                    overlap_len = (ox**2 + oy**2)**0.5
+                    fx = -(dx / dist) * overlap_len * Troop.COLLISION_COEF
+                    fy = -(dy / dist) * overlap_len * Troop.COLLISION_COEF
+                    obj_i.apply_force(Vector2(fx, fy))
 
-                    if delta.length_squared() < 1e-6:
-                        delta = Vector2(0.1, 0.1)  # nudge apart when perfectly overlapping
-                    force = delta.normalize() * overlap * Troop.COLLISION_COEF
-                    obj_i.apply_force(force)
-                    obj_j.apply_force(-force)
 
 
         ### Deploy Buffer Management ###
