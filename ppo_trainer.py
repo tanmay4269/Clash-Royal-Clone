@@ -39,6 +39,8 @@ class Trainer:
         self, 
         gym_env_name, 
         run_name=None, 
+        resume_run=None,
+        save_state_every=100_000,
         use_lr_tuner=True, 
         overfit_mode=None, 
         wandb_logging=True, 
@@ -100,13 +102,24 @@ class Trainer:
         invalid_position_mask[self.arena.height//2 :, :] = True  # bottom/opponent half is always invalid in player-1 view
         
         datetime_str = time.strftime('%m%d-%H%M%S')
-        if run_name:
+
+        # ── Run directory layout ──────────────────────────────────────
+        # Resuming: the run folder already exists; we reuse its name.
+        # New run : create a new timestamped folder under runs/.
+        if resume_run:
+            self.cfg.run_name = resume_run
+        elif run_name:
             self.cfg.run_name = f"{run_name}_{datetime_str}"
         else:
             self.cfg.run_name = datetime_str
 
-        if self.debug:
+        if self.debug and not resume_run:
             self.cfg.run_name = f"DEBUG_{self.cfg.run_name}"
+
+        self.run_dir = os.path.join("runs", self.cfg.run_name)
+        os.makedirs(self.run_dir, exist_ok=True)
+
+        self.save_state_every = save_state_every
 
         # Network Config
         self.cfg.network.entity_encoder_in_ch = self.env.flat_card_space.shape[0]
@@ -142,9 +155,11 @@ class Trainer:
         # Player Pool
         self.cfg.checkpoint_manager_type = 'elo_based'
 
+        checkpoint_dir = os.path.join(self.run_dir, "checkpoints")
+
         if self.cfg.checkpoint_manager_type == 'advanced_temporal':
             self.checkpoint_manager = AdvancedTemporal_CheckpointManagement(
-                checkpoint_dir="./checkpoints",
+                checkpoint_dir=checkpoint_dir,
                 loading_latest_ratio=0.5,
                 loading_delta_window=0.2,
                 min_games_before_checkpointing=100,
@@ -153,7 +168,7 @@ class Trainer:
             )
         elif self.cfg.checkpoint_manager_type == 'elo_based':
             self.checkpoint_manager = AdvancedEloBased_CheckpointManagement(
-                checkpoint_dir="./checkpoints",
+                checkpoint_dir=checkpoint_dir,
                 elo_cfg=self.cfg.elo,
                 loading_latest_ratio=0.5,
                 min_games_before_checkpointing=100,
@@ -201,9 +216,9 @@ class Trainer:
         self.overfit_mode = overfit_mode
 
         # Replay storing
-        self.video_dir = f"./videos/{self.cfg.run_name}/"
+        self.video_dir = os.path.join(self.run_dir, "videos")
         if self.debug:
-            self.video_dir = "./videos/DEBUG/"
+            self.video_dir = os.path.join(self.run_dir, "videos", "DEBUG")
         os.makedirs(self.video_dir, exist_ok=True)
 
         self.video_every_k_global_steps = 20_000
@@ -219,8 +234,61 @@ class Trainer:
             wandb.init(
                 project="clash_royale-ppo_self_play",
                 name=self.cfg.run_name,
-                config=self.cfg.to_dict()
+                config=self.cfg.to_dict(),
+                resume="allow",
+                id=self.cfg.run_name,  # stable ID so resuming reattaches to the same wandb run
             )
+
+        # ── Weights-to-resume ─────────────────────────────────────────
+        # Stored as an attr so train() can restore the full state after
+        # network/optimiser construction.
+        self._resume_run = resume_run
+
+
+    # ─────────────────────────────────────────────────────────────────
+    # Training-state persistence
+    # ─────────────────────────────────────────────────────────────────
+
+    def _training_state_path(self):
+        return os.path.join(self.run_dir, "training_state.pt")
+
+    def _save_training_state(self, global_step, net_1, optimiser_1):
+        """Persist enough state to fully resume training."""
+        state = {
+            "global_step":        global_step,
+            "current_elo":        self.current_elo,
+            "net_1_state_dict":   net_1.state_dict(),
+            "optimiser_state":    optimiser_1.state_dict(),
+            "lr_tuned":           self.lr_tuned,
+            "learning_rate":      self.learning_rate,
+            "entropy_loss_coef":  self.entropy_loss_coef,
+            "checkpoint_manager": self.checkpoint_manager.get_state(),
+        }
+        tmp_path = self._training_state_path() + ".tmp"
+        t.save(state, tmp_path)
+        os.replace(tmp_path, self._training_state_path())  # atomic write
+        print(f"[state] saved training state at step {global_step}")
+
+    def _load_training_state(self, net_1, optimiser_1):
+        """Load persisted state into an already-constructed net/optimiser.
+        Returns the global_step to resume from (0 if no state found)."""
+        path = self._training_state_path()
+        if not os.path.exists(path):
+            print(f"[state] no training_state.pt found in {self.run_dir} — starting fresh")
+            return 0
+
+        state = t.load(path, weights_only=False)
+        net_1.load_state_dict(state["net_1_state_dict"])
+        optimiser_1.load_state_dict(state["optimiser_state"])
+        self.current_elo        = state["current_elo"]
+        self.lr_tuned           = state["lr_tuned"]
+        self.learning_rate      = state["learning_rate"]
+        self.entropy_loss_coef  = state["entropy_loss_coef"]
+        self.checkpoint_manager.load_state(state["checkpoint_manager"])
+
+        global_step = state["global_step"]
+        print(f"[state] resumed from step {global_step} (elo={self.current_elo:.1f})")
+        return global_step
 
 
     def train(self):
@@ -229,11 +297,18 @@ class Trainer:
         N = self.num_envs
         ep_returns = []
 
-        global_step = 0
+        net_1, optimiser_1 = self.get_network_and_optimiser()
+
+        # Restore full training state if this is a resumed run
+        if self._resume_run:
+            global_step = self._load_training_state(net_1, optimiser_1)
+        else:
+            global_step = 0
+
         next_video = 0
+        next_save_state = (global_step // self.save_state_every + 1) * self.save_state_every
         # next_video = self.video_every_k_global_steps
 
-        net_1, optimiser_1 = self.get_network_and_optimiser()
         initial_net = deepcopy(net_1)
         opponent_elo = self.cfg.elo.initial_rating
         
@@ -456,6 +531,11 @@ class Trainer:
                 }, step=global_step)
 
             buffer = None  # free merged buffer
+
+            # Periodic full training-state checkpoint
+            if global_step >= next_save_state:
+                self._save_training_state(global_step, net_1, optimiser_1)
+                next_save_state = global_step + self.save_state_every
 
     
     def ppo_update(self, buffer, net, optimiser, global_step=0, profile=False):
@@ -891,6 +971,25 @@ if __name__ == "__main__":
         help="Prefix for the run name; date-time will be appended."
     )
     parser.add_argument(
+        "--resume_run",
+        type=str,
+        default=None,
+        metavar="RUN_NAME",
+        help=(
+            "Name of an existing run folder inside runs/ to resume. "
+            "The full training state (net, optimiser, ELO, checkpoint manager) "
+            "is restored from training_state.pt inside that folder."
+        ),
+    )
+    parser.add_argument(
+        "--save_state_every",
+        type=int,
+        # default=100_000,
+        default=1_000,
+        metavar="STEPS",
+        help="Save a full training-state snapshot every N global env steps.",
+    )
+    parser.add_argument(
         "--use_lr_tuner", 
         action=argparse.BooleanOptionalAction, 
         default=False, 
@@ -965,6 +1064,8 @@ if __name__ == "__main__":
     trainer = Trainer(
         gym_env_name="ClashRoyaleEnv-v0",
         run_name=args.run_name,
+        resume_run=args.resume_run,
+        save_state_every=args.save_state_every,
         use_lr_tuner=args.use_lr_tuner,
         overfit_mode=args.overfit_mode,
         wandb_logging=args.wandb_logging,

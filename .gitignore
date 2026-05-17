@@ -5,3 +5,4 @@ saved-videos
 videos
 wandb
 checkpoints
+runs/

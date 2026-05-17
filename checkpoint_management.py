@@ -103,6 +103,7 @@ class AdvancedTemporal_CheckpointManagement:
         # Storage
         self.min_games_before_checkpointing = min_games_before_checkpointing
         self.avg_score_threshold = avg_score_threshold
+        self._score_queue_maxlen = score_queue_size
 
         self.checkpoint_counter = 0
         os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -147,6 +148,20 @@ class AdvancedTemporal_CheckpointManagement:
         self.score_queue.clear()
 
 
+    def get_state(self):
+        """Return a dict that fully captures this manager's internal state."""
+        return {
+            "checkpoint_counter": self.checkpoint_counter,
+            "score_queue": list(self.score_queue),
+        }
+
+
+    def load_state(self, state: dict):
+        """Restore internal state from a previously saved dict."""
+        self.checkpoint_counter = state["checkpoint_counter"]
+        self.score_queue = deque(state["score_queue"], maxlen=self._score_queue_maxlen)
+
+
 class AdvancedEloBased_CheckpointManagement:
     def __init__(
         self, 
@@ -171,12 +186,12 @@ class AdvancedEloBased_CheckpointManagement:
         # Storage
         self.min_games_before_checkpointing = min_games_before_checkpointing
         self.avg_score_threshold = avg_score_threshold
+        self._score_queue_maxlen = score_queue_size
 
         self.checkpoint_counter = 0
         os.makedirs(self.checkpoint_dir, exist_ok=True)
 
         self.score_queue = deque(maxlen=score_queue_size)
-
 
         self.stored_by_idx = {}  # checkpoint_idx -> (elo, path)
         self.stored_by_elo = {}  # elo -> [checkpoint_indices]
@@ -243,3 +258,26 @@ class AdvancedEloBased_CheckpointManagement:
 
         self.checkpoint_counter += 1
         self.score_queue.clear()
+
+
+    def get_state(self):
+        """Return a dict that fully captures this manager's internal state."""
+        return {
+            "checkpoint_counter": self.checkpoint_counter,
+            "score_queue": list(self.score_queue),
+            "stored_by_idx": {k: list(v) for k, v in self.stored_by_idx.items()},
+            "stored_by_elo": {k: list(v) for k, v in self.stored_by_elo.items()},
+        }
+
+
+    def load_state(self, state: dict):
+        """Restore internal state from a previously saved dict."""
+        self.checkpoint_counter = state["checkpoint_counter"]
+        self.score_queue = deque(state["score_queue"], maxlen=self._score_queue_maxlen)
+        # stored_by_idx keys are ints serialised as strings by json/pickle — normalise
+        self.stored_by_idx = {
+            int(k): tuple(v) for k, v in state["stored_by_idx"].items()
+        }
+        self.stored_by_elo = {
+            int(k): list(v) for k, v in state["stored_by_elo"].items()
+        }
