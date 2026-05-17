@@ -186,8 +186,8 @@ class Arena:
                 elif isinstance(obj_i, Building) and isinstance(obj_j, Troop):
                     dx = obj_i.position.x - obj_j.position.x
                     dy = obj_i.position.y - obj_j.position.y
-                    ox = (obj_i.size / 2 + obj_j.size) - abs(dx)
-                    oy = (obj_i.size / 2 + obj_j.size) - abs(dy)
+                    ox = (obj_i.size.x / 2 + obj_j.size) - abs(dx)
+                    oy = (obj_i.size.y / 2 + obj_j.size) - abs(dy)
                     
                     if ox < 0 or oy < 0:
                         continue
@@ -205,8 +205,8 @@ class Arena:
                 elif isinstance(obj_i, Troop) and isinstance(obj_j, Building):
                     dx = obj_j.position.x - obj_i.position.x
                     dy = obj_j.position.y - obj_i.position.y
-                    ox = (obj_j.size / 2 + obj_i.size) - abs(dx)
-                    oy = (obj_j.size / 2 + obj_i.size) - abs(dy)
+                    ox = (obj_j.size.x / 2 + obj_i.size) - abs(dx)
+                    oy = (obj_j.size.y / 2 + obj_i.size) - abs(dy)
                     
                     if ox < 0 or oy < 0:
                         continue
