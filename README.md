@@ -27,18 +27,18 @@ python ppo_trainer.py --num_envs 8
 If you are modifying the engine physics or observation wrappers and want to test environment throughput (Steps/Sec) directly without network overhead:
 
 ```bash
-python benchmark.py
+python profiling.py
 ```
 
 This script will run a heavy workload on both a single environment and an 8x parallel environment manager, reporting the exact FPS. To dive deeper and print micro-benchmarks for engine components (like `arena.update`), use the environment variable guard:
 
 ```bash
-PROFILE_ENV=1 python benchmark.py
+PROFILE_ENV=1 python profiling.py
 ```
 
 ### 3. Debug Mode
 
-For quick iterations, run the trainer in debug mode. This drastically reduces buffer sizes, minibatch sizes, and enables verbose output:
+For quick iterations, run the trainer in debug mode. This drastically reduces buffer sizes, minibatch sizes, disables wandb logging, and enables verbose output:
 
 ```bash
 python ppo_trainer.py --debug
