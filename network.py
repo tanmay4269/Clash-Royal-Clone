@@ -150,7 +150,7 @@ class ActorCritic(nn.Module):
         """
         value, skip_logits, deck_logits, pos_logits = self(obs)
 
-        # --- Static masks (always applied) ---
+        # --- Static masks ---
         if invalid_deck_mask is not None:
             deck_logits = deck_logits.masked_fill(invalid_deck_mask, float('-inf'))
         if invalid_position_mask is not None:
@@ -158,18 +158,17 @@ class ActorCritic(nn.Module):
         if self.invalid_position_mask is not None:
             pos_logits = pos_logits.masked_fill(self.invalid_position_mask, float('-inf'))
 
-        # Elixir mask — sampling only so stored log-probs stay consistent during PPO re-evaluation.
-        if action is None:
-            raw_elixirs = (obs["elixirs"] + 1.0) / 2.0 * self.max_elixirs  # (B, 1)
-            elixir_mask = self.deck_deploy_costs.unsqueeze(0) > raw_elixirs  # (B, num_cards)
-            deck_logits = deck_logits.masked_fill(elixir_mask, float('-inf'))
+        # --- Elixir masks ---
+        raw_elixirs = (obs["elixirs"] + 1.0) / 2.0 * self.max_elixirs  # (B, 1)
+        elixir_mask = self.deck_deploy_costs.unsqueeze(0) > raw_elixirs  # (B, num_cards)
+        deck_logits = deck_logits.masked_fill(elixir_mask, float('-inf'))
 
-            all_masked = elixir_mask.all(dim=-1)  # (B,) — can't afford anything
-            if all_masked.any():
-                # Use large finite value, NOT inf: Bernoulli(logits=inf).log_prob() → NaN.
-                skip_logits = skip_logits.masked_fill(all_masked, 20.0)
-                # Zero out fully-masked rows so Categorical doesn't receive all-inf logits.
-                deck_logits = deck_logits.masked_fill(all_masked.unsqueeze(-1), 0.0)
+        all_masked = elixir_mask.all(dim=-1)  # (B,) — can't afford anything
+        if all_masked.any():
+            # Use large finite value, NOT inf: Bernoulli(logits=inf).log_prob() → NaN.
+            skip_logits = skip_logits.masked_fill(all_masked, 20.0)
+            # Zero out fully-masked rows so Categorical doesn't receive all-inf logits.
+            deck_logits = deck_logits.masked_fill(all_masked.unsqueeze(-1), 0.0)
 
         skip_dist = t.distributions.Bernoulli(logits=skip_logits)
         deck_dist = t.distributions.Categorical(logits=deck_logits)

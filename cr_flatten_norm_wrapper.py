@@ -2,7 +2,10 @@ from gymnasium import spaces
 from gymnasium.spaces.utils import flatten, flatten_space, flatdim
 import gymnasium as gym
 import numpy as np
+import os
+import time
 
+PROFILE_ENV = os.environ.get("PROFILE_ENV") == "1"
 
 class CRFlattenNormWrapper(gym.ObservationWrapper):
     SEQUENCE_KEYS = ("player_1_cards", "player_2_cards")
@@ -57,7 +60,10 @@ class CRFlattenNormWrapper(gym.ObservationWrapper):
         return self._norm(flatten(self._tower_space, tower), self._tower_mid, self._tower_half)
 
     def observation(self, obs):
-        return {
+        if PROFILE_ENV:
+            t0 = time.perf_counter()
+            
+        ret = {
             "game_completion_fraction": obs["game_completion_fraction"] * 2.0 - 1.0,
             "player_1_elixirs":         (obs["player_1_elixirs"] / 10) * 2.0 - 1.0,
             "player_1_cards":           [self._flat_norm_card(c) for c in obs["player_1_cards"]],
@@ -66,3 +72,8 @@ class CRFlattenNormWrapper(gym.ObservationWrapper):
             "player_2_cards":           [self._flat_norm_card(c) for c in obs["player_2_cards"]],
             "player_2_crown_towers":    tuple(self._flat_norm_tower(obs["player_2_crown_towers"][k]) for k in self.TOWER_SUBKEYS),
         }
+        
+        if PROFILE_ENV:
+            print(f"[PROFILE] cr_flatten_norm_wrapper.observation: {(time.perf_counter() - t0)*1000:.3f} ms")
+            
+        return ret

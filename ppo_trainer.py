@@ -984,8 +984,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--save_state_every",
         type=int,
-        # default=100_000,
-        default=1_000,
+        default=100_000,
         metavar="STEPS",
         help="Save a full training-state snapshot every N global env steps.",
     )

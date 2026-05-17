@@ -1,6 +1,11 @@
 from utils import *
 from cr_flatten_norm_wrapper import CRFlattenNormWrapper
 
+import os
+import time
+
+PROFILE_ENV = os.environ.get("PROFILE_ENV") == "1"
+
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.envs.registration import register
@@ -257,11 +262,24 @@ class ClashRoyaleEnv(gym.Env):
         
         # For stable physics updates
         terminated, truncated = False, False
+        if PROFILE_ENV:
+            t0 = time.perf_counter()
+            
         for _ in range(10):
             _terminated, _truncated = self.arena.update(self.FIXED_DT / 10)
             terminated, truncated = terminated or _terminated, truncated or _truncated
+            
+        if PROFILE_ENV:
+            print(f"[PROFILE] arena.update (10x): {(time.perf_counter() - t0)*1000:.3f} ms")
         
+        if PROFILE_ENV:
+            t0 = time.perf_counter()
+            
         self._cur_obs = self._get_obs()
+        
+        if PROFILE_ENV:
+            print(f"[PROFILE] cr_gym_env._get_obs: {(time.perf_counter() - t0)*1000:.3f} ms")
+
 
         reward = self._get_reward(prev_obs, terminated, truncated)
         info = self._get_info()
