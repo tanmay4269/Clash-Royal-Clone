@@ -1074,8 +1074,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num_envs",
         type=int,
-        default=1,
+        default=8,
         help="Number of parallel env workers for rollout collection."
+    )
+    parser.add_argument(
+        "--kl_early_stopping",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable early stopping based on KL divergence."
     )
     parser.add_argument(
         "--kl_threshold",
@@ -1083,12 +1089,6 @@ if __name__ == "__main__":
         default=0.01,
         metavar="KL",
         help="Max approximate KL divergence allowed per PPO update. The epoch loop exits early when exceeded. Default: 0.01."
-    )
-    parser.add_argument(
-        "--kl_early_stopping",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Enable early stopping based on KL divergence."
     )
     parser.add_argument(
         "--advantage_normalization_type",
