@@ -62,6 +62,8 @@ Latest run is a big deal coz it is able to surpass the 75% winrate while anythin
 
 ### Gameplay:
 <video controls src="readme-assets/run-16_gameplay_1.48M.mp4" title="Run-16 Gameplay after 1.48M Steps"></video>
+https://github.com/user-attachments/assets/83912232-d85e-4d70-85af-cf0871923717
+
 
 ### Other distinctive features:
 - [pro] very clear score, reward and elo upward trend
