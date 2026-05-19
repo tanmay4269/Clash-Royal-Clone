@@ -68,7 +68,7 @@ class RolloutBuffer:
         self.returns[:n] = self.advantages[:n] + self.values[:n]
 
 
-    def get_minibatches(self, batch_size):
+    def get_minibatches(self, batch_size, adv_norm_type="minibatch", adv_metrics_tracker=None):
         """batch_size: int -> yields (states, actions, old_log_probs, advantages, returns) as torch tensors"""
         n = self.ptr  # Use actual filled count
         indices = np.random.permutation(n)
@@ -78,7 +78,26 @@ class RolloutBuffer:
 
             # Per-minibatch advantage normalization
             mb_advantages = self.advantages[batch_idx]
-            mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+            
+            if adv_norm_type == "minibatch":
+                mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+            elif adv_norm_type == "moving_stats":
+                mb_mean = mb_advantages.mean().item()
+                mb_var = mb_advantages.var().item()
+                
+                # Update moving stats
+                if adv_metrics_tracker is not None:
+                    momentum = 0.99
+                    adv_metrics_tracker[0] = momentum * adv_metrics_tracker[0] + (1 - momentum) * mb_mean
+                    adv_metrics_tracker[1] = momentum * adv_metrics_tracker[1] + (1 - momentum) * mb_var
+                    
+                    mean = adv_metrics_tracker[0]
+                    std = np.sqrt(adv_metrics_tracker[1] + 1e-8)
+                else:
+                    mean = mb_mean
+                    std = mb_advantages.std().item() + 1e-8
+                    
+                mb_advantages = (mb_advantages - mean) / std
 
             yield (
                 self.unflatten_dict(self.states[batch_idx], self.state_shapes),

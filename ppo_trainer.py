@@ -53,6 +53,8 @@ class Trainer:
         winning_reward=5.0,
         num_envs=1,
         kl_threshold=0.01,
+        kl_early_stopping=False,
+        advantage_normalization_type="minibatch",
         num_ppo_epochs=40,
 ):
         # Seed first — before ANY CUDA init, gym.make, or network construction
@@ -211,9 +213,16 @@ class Trainer:
         if os.environ.get("DEBUG_MODE"):
             self.cfg.minibatch_size = 128
 
+        #
         self.cfg.num_ppo_epochs = num_ppo_epochs  # gradient steps per rollout
         self.cfg.kl_threshold = kl_threshold  # KL early-stop threshold
+        self.cfg.kl_early_stopping = kl_early_stopping
         self.cfg.max_steps = 10_000_000  # total env steps
+
+        # 
+        self.cfg.advantage_normalization_type = advantage_normalization_type
+        self.adv_moving_mean = 0.0
+        self.adv_moving_var = 1.0
 
         # None, 'single-buffer', 'fixed-opponent', 'vs-random', 'vs-skip', or 'vs-scripted'
         self.overfit_mode = overfit_mode
@@ -501,7 +510,7 @@ class Trainer:
 
             # PPO update
             actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance, \
-                pre_clip_grad_norm, critic_weight_norm, approx_kl, epochs_completed = \
+                pre_clip_grad_norm, critic_weight_norm, approx_kl, clip_fraction, epochs_completed = \
                 self.ppo_update(buffer, net_1, optimiser_1, global_step,
                                 profile=_is_profile_update)
             
@@ -528,13 +537,16 @@ class Trainer:
                     "ratio_mean":           ratio_mean,
                     "advantage_mean":       advantage_mean,
                     "explained_variance":   explained_variance,
-                    "approx_kl":            approx_kl,
-                    "ppo_epochs_completed": epochs_completed,
 
                     # Critic instability diagnostics
                     "critic_instability_diagnostics/pre_clip_grad_norm":  pre_clip_grad_norm,
                     "critic_instability_diagnostics/critic_weight_norm":  critic_weight_norm,
                     "critic_instability_diagnostics/value_mean":          buffer.values.mean().item(),
+                    
+                    # PPO update quality diagnostics
+                    "ppo_update_diagnostics/clip_fraction":    clip_fraction,
+                    "ppo_update_diagnostics/approx_kl":        approx_kl,
+                    "ppo_update_diagnostics/epochs_completed": epochs_completed,
                 }, step=global_step)
 
             buffer = None  # free merged buffer
@@ -573,6 +585,7 @@ class Trainer:
         pre_clip_grad_norm_meter = AverageMeter()
         critic_weight_norm_meter = AverageMeter()
         approx_kl_meter = AverageMeter()
+        clip_fraction_meter = AverageMeter()
 
         ppo_t0 = time.perf_counter() if profile else None
         epoch_times: list[float] = []
@@ -582,9 +595,11 @@ class Trainer:
             epoch_t0 = time.perf_counter() if profile else None
             epoch_approx_kl_meter = AverageMeter()
 
-            for batch in buffer.get_minibatches(self.cfg.minibatch_size):
+            adv_metrics_tracker = [self.adv_moving_mean, self.adv_moving_var]
+
+            for batch in buffer.get_minibatches(self.cfg.minibatch_size, self.cfg.advantage_normalization_type, adv_metrics_tracker):
                 actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance, \
-                    pre_clip_grad_norm, critic_weight_norm, approx_kl = \
+                    pre_clip_grad_norm, critic_weight_norm, approx_kl, clip_fraction = \
                     self.on_batch_update(
                         net,
                         optimiser,
@@ -602,6 +617,9 @@ class Trainer:
                 critic_weight_norm_meter.add_sample(critic_weight_norm)
                 approx_kl_meter.add_sample(approx_kl)
                 epoch_approx_kl_meter.add_sample(approx_kl)
+                clip_fraction_meter.add_sample(clip_fraction)
+
+            self.adv_moving_mean, self.adv_moving_var = adv_metrics_tracker
 
             if profile:
                 epoch_times.append(time.perf_counter() - epoch_t0)
@@ -610,7 +628,7 @@ class Trainer:
 
             # KL early stopping: exit epoch loop if policy has drifted too far
             epoch_kl = epoch_approx_kl_meter.average()
-            if epoch_kl > self.cfg.kl_threshold:
+            if self.cfg.kl_early_stopping and epoch_kl > self.cfg.kl_threshold:
                 print(f"[ppo] KL early stop at epoch {epoch} (approx_kl={epoch_kl:.4f} > threshold={self.cfg.kl_threshold})")
                 break
 
@@ -657,6 +675,7 @@ class Trainer:
             pre_clip_grad_norm_meter.average(),
             critic_weight_norm_meter.average(),
             approx_kl_meter.average(),
+            clip_fraction_meter.average(),
             epochs_completed,
         )
 
@@ -694,11 +713,16 @@ class Trainer:
 
         explained_variance = 1 - (returns - values).var() / returns.var()
 
-        # Approximate KL divergence (numerically stable, second-order estimate)
-        # KL(π_old || π_new) ≈ mean((ratio - 1) - log(ratio))
         with t.no_grad():
+            # Approximate KL divergence (numerically stable, second-order estimate)
+            # KL(π_old || π_new) ≈ mean((ratio - 1) - log(ratio))
             log_ratio = new_log_probs - old_log_probs
             approx_kl = ((ratio - 1) - log_ratio).mean().item()
+
+            # Best metric to check if the rollout is efficiently being used and not wasted nor overfit.
+            # Healthy range: 0.05 - 0.15
+            # Below 0.02 is underutilisation; above 0.30 is overfitting.
+            clip_fraction = (t.abs(ratio - 1) > self.cfg.ppo_clip).float().mean().item()
 
         return (
             actor_loss.item(),
@@ -710,6 +734,7 @@ class Trainer:
             pre_clip_grad_norm,
             critic_weight_norm,
             approx_kl,
+            clip_fraction,
         )
 
 
@@ -1060,6 +1085,19 @@ if __name__ == "__main__":
         help="Max approximate KL divergence allowed per PPO update. The epoch loop exits early when exceeded. Default: 0.01."
     )
     parser.add_argument(
+        "--kl_early_stopping",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable early stopping based on KL divergence."
+    )
+    parser.add_argument(
+        "--advantage_normalization_type",
+        type=str,
+        default="moving_stats",
+        choices=["minibatch", "moving_stats"],
+        help="Type of advantage normalization to use."
+    )
+    parser.add_argument(
         "--num_ppo_epochs",
         type=int,
         default=40,
@@ -1120,6 +1158,8 @@ if __name__ == "__main__":
         winning_reward=args.winning_reward,
         num_envs=args.num_envs,
         kl_threshold=args.kl_threshold,
+        kl_early_stopping=args.kl_early_stopping,
+        advantage_normalization_type=args.advantage_normalization_type,
         num_ppo_epochs=args.num_ppo_epochs,
     )
 
