@@ -1093,7 +1093,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--advantage_normalization_type",
         type=str,
-        default="moving_stats",
+        default="minibatch",
         choices=["minibatch", "moving_stats"],
         help="Type of advantage normalization to use."
     )
