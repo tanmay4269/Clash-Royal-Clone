@@ -35,6 +35,14 @@ class DiagnosticsLogger:
         self._ep_returns = []
         self._ep_scores = []
 
+        # Accumulated per-episode action/game diagnostics (parallel env path)
+        self._ep_avg_elixirs = []
+        self._ep_skip_ratios = []
+        self._ep_deck_indices = []  # flat list across all episodes
+        self._ep_pos_x = []
+        self._ep_pos_y = []
+        self._ep_durations = []
+
     def on_step(self, action_1, env):
         # Collect metrics for Player 1
         action_1_cpu = {k: v.cpu().numpy() for k, v in action_1.items()}
@@ -101,7 +109,7 @@ class DiagnosticsLogger:
 
         self.reset_episode_stats()
 
-    def on_episode_end_simple(self, terminated, truncated, current_elo, ep_return, score):
+    def on_episode_end_simple(self, terminated, truncated, current_elo, ep_return, score, episode_info=None):
         """
         Lightweight episode-end accumulator for parallel envs.
         Does not require direct env access, and does NOT log to wandb immediately.
@@ -110,6 +118,10 @@ class DiagnosticsLogger:
         tick. Calling wandb.log(..., step=X) multiple times with the same X causes
         silent overwrites — only the last call survives. Instead, we accumulate
         stats here and flush them as averages in on_ppo_update().
+
+        episode_info: the ``info["episode"]`` dict emitted by ClashRoyaleEnv at
+            episode end. Contains tower_kills, avg_elixir, skip_ratio, deck_indices,
+            pos_x, pos_y, ep_steps.
         """
         self.buffer_games_completed += 1
         if terminated:
@@ -121,7 +133,20 @@ class DiagnosticsLogger:
         self._ep_returns.append(ep_return)
         self._ep_scores.append(score)
 
-        self.reset_episode_stats()
+        if episode_info is not None:
+            self.buffer_towers_killed_by_p1 += episode_info.get("towers_killed_by_p1", 0)
+            self.buffer_towers_killed_by_p2 += episode_info.get("towers_killed_by_p2", 0)
+            self._ep_avg_elixirs.append(episode_info.get("avg_elixir_p1", 0.0))
+            self._ep_skip_ratios.append(episode_info.get("skip_ratio", 0.0))
+            self._ep_deck_indices.extend(episode_info.get("deck_indices", []))
+            self._ep_pos_x.extend(episode_info.get("pos_x", []))
+            self._ep_pos_y.extend(episode_info.get("pos_y", []))
+            self._ep_durations.append(episode_info.get("ep_steps", 0))
+
+        # Note: reset_episode_stats() is intentionally NOT called here because
+        # on_episode_end_simple does not use the step-by-step accumulators
+        # (ep_decks etc.) — those live inside the env process. The buffer-level
+        # accumulators above are flushed in on_ppo_update().
 
     def on_ppo_update(self, global_step, buffer, net_curr, net_init, net_prev):
         if not self.wandb_logging:
@@ -137,13 +162,35 @@ class DiagnosticsLogger:
             }, step=global_step)
 
         # --- Buffer-level game diagnostics ---
-        wandb.log({
+        game_diag = {
             "game_diagnostics/buffer_games_completed":  self.buffer_games_completed,
             "game_diagnostics/buffer_games_truncated":  self.buffer_games_truncated,
             "game_diagnostics/buffer_games_terminated": self.buffer_games_terminated,
             "game_diagnostics/avg_towers_killed_by_p1": self.buffer_towers_killed_by_p1 / max(1, self.buffer_games_completed),
             "game_diagnostics/avg_towers_killed_by_p2": self.buffer_towers_killed_by_p2 / max(1, self.buffer_games_completed),
-        }, step=global_step)
+        }
+
+        if self._ep_avg_elixirs:
+            game_diag["game_diagnostics/avg_elixir_p1"] = np.mean(self._ep_avg_elixirs)
+        if self._ep_skip_ratios:
+            game_diag["action_diagnostics/skip_ratio"] = np.mean(self._ep_skip_ratios)
+        if self._ep_durations:
+            game_diag["game_diagnostics/avg_ep_duration_frames"] = np.mean(self._ep_durations)
+        if self._ep_deck_indices:
+            game_diag["action_diagnostics/deck_idx_hist"] = wandb.Histogram(self._ep_deck_indices)
+            counts = np.bincount(self._ep_deck_indices, minlength=self.cfg.network.num_cards_in_deck)
+            proportions = counts / max(1, sum(counts))
+            fig = go.Figure(data=[
+                go.Bar(name=f"Card {i}", x=["Deck"], y=[proportions[i]])
+                for i in range(self.cfg.network.num_cards_in_deck)
+            ])
+            fig.update_layout(barmode='stack', title="Deck Usage Proportions")
+            game_diag["action_diagnostics/deck_stacked_chart"] = wandb.Html(fig.to_html(auto_play=False))
+        if self._ep_pos_x:
+            game_diag["action_diagnostics/pos_x_hist"] = wandb.Histogram(self._ep_pos_x)
+            game_diag["action_diagnostics/pos_y_hist"] = wandb.Histogram(self._ep_pos_y)
+
+        wandb.log(game_diag, step=global_step)
 
         self.reset_buffer_stats()
 

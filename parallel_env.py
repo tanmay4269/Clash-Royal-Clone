@@ -53,7 +53,7 @@ def _worker_fn(pipe, env_name, env_kwargs, wrapper_cls):
 
                 elif cmd == "step":
                     obs, reward, terminated, truncated, info = env.step(data)
-                    pipe.send((obs, reward, terminated, truncated))
+                    pipe.send((obs, reward, terminated, truncated, info))
 
                 elif cmd == "get_attr":
                     pipe.send(getattr(env, data))
@@ -129,7 +129,7 @@ class ParallelEnvManager:
 
     def step(self, actions):
         """
-        Step all envs. Returns list of N tuples: (obs, reward, terminated, truncated).
+        Step all envs. Returns list of N tuples: (obs, reward, terminated, truncated, info).
         
         actions: list of N action dicts
         """
@@ -139,7 +139,7 @@ class ParallelEnvManager:
         return [_check_result(pipe.recv(), i) for i, pipe in enumerate(self.parent_pipes)]
 
     def step_single(self, env_idx, action):
-        """Step a single env."""
+        """Step a single env. Returns (obs, reward, terminated, truncated, info)."""
         self.parent_pipes[env_idx].send(("step", action))
         return _check_result(self.parent_pipes[env_idx].recv(), env_idx)
 

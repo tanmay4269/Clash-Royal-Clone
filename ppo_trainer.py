@@ -390,20 +390,21 @@ class Trainer:
                 else:
                     # Single env fallback
                     try:
-                        next_state, reward, terminated, truncated, _ = self.env.step(joined_actions[0])
+                        next_state, reward, terminated, truncated, info = self.env.step(joined_actions[0])
                     except Exception as e:
                         print(f"Env step failed: {e}")
                         next_state = states[0]
                         reward = [0.0, 0.0]
                         terminated = True
                         truncated = False
-                    results = [(next_state, reward, terminated, truncated)]
+                        info = {}
+                    results = [(next_state, reward, terminated, truncated, info)]
                 if _is_profile_update:
                     _frame_times.append(time.perf_counter() - _frame_t0)
 
                 # --- Process results from each env ---
                 for i in range(N):
-                    next_state, reward, terminated, truncated = results[i]
+                    next_state, reward, terminated, truncated, info = results[i]
                     done = terminated or truncated
                     last_done[i] = terminated
 
@@ -437,11 +438,12 @@ class Trainer:
                         E_A = 1 / (1 + 10 ** ((opponent_elo - self.current_elo) / self.cfg.elo.scale))
                         self.current_elo = self.current_elo + self.cfg.elo.k_factor * (score - E_A)
 
-                        # Log episode end (diagnostics logger needs env access — we skip per-step
-                        # env-specific logging for parallel envs, but episode-level stats are tracked)
+                        # Pass episode_info (tower kills, elixir, deck/pos histograms) from the env
+                        episode_info = info.get("episode", None)
                         self.logger.on_episode_end_simple(
                             terminated, truncated,
-                            self.current_elo, ep_return[i][0], score
+                            self.current_elo, ep_return[i][0], score,
+                            episode_info=episode_info,
                         )
 
                         ep_returns.append(ep_return[i].copy())

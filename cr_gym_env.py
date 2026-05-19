@@ -127,6 +127,14 @@ class ClashRoyaleEnv(gym.Env):
 
         self._cur_obs = None
 
+        # Per-episode accumulators (populated during step, read in _get_info at episode end)
+        self._ep_steps = 0
+        self._ep_elixir_sum = 0.0
+        self._ep_skips = 0
+        self._ep_decks = []
+        self._ep_pos_x = []
+        self._ep_pos_y = []
+
 
     def _get_obs(self):
         obs = {}
@@ -211,20 +219,51 @@ class ClashRoyaleEnv(gym.Env):
         return obs
 
 
-    def _get_info(self):
+    def _get_info(self, terminated=False, truncated=False):
         """
-        Oftentimes, info will also contain some data that is only available inside the step method 
-        (e.g., individual reward terms). In that case, we would have to update the dictionary that 
-        is returned by _get_info in step.
+        Returns diagnostic info that crosses the process boundary for parallel envs.
+        At episode end (terminated or truncated) we also include per-episode aggregates
+        so the main process can log them without needing direct env access.
         """
-        # TODO (maybe)
-        return {}
+        info = {}
+
+        if terminated or truncated:
+            # Tower kills: count towers whose health dropped to 0
+            towers_killed_by_p1 = sum(
+                1 for t_name in ["king_tower", "princess_tower_1", "princess_tower_2"]
+                if float(self._cur_obs["player_2_crown_towers"][t_name]["health"]) <= 0
+            )
+            towers_killed_by_p2 = sum(
+                1 for t_name in ["king_tower", "princess_tower_1", "princess_tower_2"]
+                if float(self._cur_obs["player_1_crown_towers"][t_name]["health"]) <= 0
+            )
+
+            info["episode"] = {
+                "towers_killed_by_p1": towers_killed_by_p1,
+                "towers_killed_by_p2": towers_killed_by_p2,
+                "avg_elixir_p1":       self._ep_elixir_sum / max(1, self._ep_steps),
+                "skip_ratio":          self._ep_skips / max(1, self._ep_steps),
+                "deck_indices":        list(self._ep_decks),
+                "pos_x":               list(self._ep_pos_x),
+                "pos_y":               list(self._ep_pos_y),
+                "ep_steps":            self._ep_steps,
+            }
+
+        return info
 
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
         self.arena = Arena()
+
+        # Reset per-episode accumulators
+        self._ep_steps = 0
+        self._ep_elixir_sum = 0.0
+        self._ep_skips = 0
+        self._ep_decks = []
+        self._ep_pos_x = []
+        self._ep_pos_y = []
 
         self._cur_obs = self._get_obs()
         info = self._get_info()
@@ -236,6 +275,17 @@ class ClashRoyaleEnv(gym.Env):
 
 
     def step(self, action):
+        # Accumulate per-step diagnostics for player 1
+        self._ep_steps += 1
+        self._ep_elixir_sum += float(self.arena.player_side_1.elixirs)
+        p1_skip = int(action["player_1_skip"])
+        self._ep_skips += p1_skip
+        if p1_skip == 0:
+            self._ep_decks.append(int(action["player_1_card_idx"]))
+            pos = action["player_1_card_position"]
+            self._ep_pos_x.append(int(pos[0]))
+            self._ep_pos_y.append(int(pos[1]))
+
         for idx in [1, 2]:
             if action[f"player_{idx}_skip"] == 1:
                 continue
@@ -282,7 +332,16 @@ class ClashRoyaleEnv(gym.Env):
 
 
         reward = self._get_reward(prev_obs, terminated, truncated)
-        info = self._get_info()
+        info = self._get_info(terminated=terminated, truncated=truncated)
+
+        if terminated or truncated:
+            # Reset accumulators so a fresh episode starts clean after auto-reset
+            self._ep_steps = 0
+            self._ep_elixir_sum = 0.0
+            self._ep_skips = 0
+            self._ep_decks = []
+            self._ep_pos_x = []
+            self._ep_pos_y = []
 
         if self.render_mode == "human":
             self._render_frame()
