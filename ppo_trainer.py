@@ -1028,7 +1028,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--gae_gamma", 
         type=float, 
-        default=0.99, 
+        default=0.997, 
         help="Discount factor (gamma) for GAE."
     )
     

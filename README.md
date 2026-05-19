@@ -43,3 +43,27 @@ For quick iterations, run the trainer in debug mode. This drastically reduces bu
 ```bash
 python ppo_trainer.py --debug
 ```
+
+---
+# Latest Progress
+
+![run 16 vs 14 vs 12](readme-assets/run-16_vs_run-14_vs_run-12.png)
+
+### Summary
+- Magenta: Run 12
+    - overfit mode: vs-scripted
+- Dark Green: Run 14
+    - overfit mode: vs-random
+- Light Green: Run 16
+    - overfit mode: vs-random
+    - elixir based forced card or full skip
+
+Latest run is a big deal coz it is able to surpass the 75% winrate while anything above 55% is considered pretty good. So the current network and training approach is finally strong enough to proceed to real self-play dynamics.
+
+### Gameplay:
+<video controls src="readme-assets/run-16_gameplay_1.48M.mp4" title="Run-16 Gameplay after 1.48M Steps"></video>
+
+### Other distinctive features:
+- [pro] very clear score, reward and elo upward trend
+- [pro] gameplay wise: the position distribution are extremely sharp unlike ever before
+- [con] seems like its completely given up on knight and giant! perhaps adding in the rest of the 5 cards to complete the deck can prevent this imbalance
