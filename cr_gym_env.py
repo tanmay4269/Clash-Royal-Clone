@@ -350,7 +350,7 @@ class ClashRoyaleEnv(gym.Env):
 
 
     def _get_reward(self, prev_obs, terminated=False, truncated=False):
-        player_1_reward, player_2_reward = self.step_penalty, self.step_penalty
+        player_1_reward, player_2_reward = -self.step_penalty, -self.step_penalty
         
         if prev_obs is None:
             return player_1_reward, player_2_reward

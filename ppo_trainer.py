@@ -52,6 +52,8 @@ class Trainer:
         tower_distruction_reward=0.5,
         winning_reward=5.0,
         num_envs=1,
+        kl_threshold=0.01,
+        num_ppo_epochs=40,
 ):
         # Seed first — before ANY CUDA init, gym.make, or network construction
         self.cfg = Dict()
@@ -209,7 +211,8 @@ class Trainer:
         if os.environ.get("DEBUG_MODE"):
             self.cfg.minibatch_size = 128
 
-        self.cfg.k_epochs = 6  # gradient steps per rollout
+        self.cfg.num_ppo_epochs = num_ppo_epochs  # gradient steps per rollout
+        self.cfg.kl_threshold = kl_threshold  # KL early-stop threshold
         self.cfg.max_steps = 10_000_000  # total env steps
 
         # None, 'single-buffer', 'fixed-opponent', 'vs-random', 'vs-skip', or 'vs-scripted'
@@ -498,7 +501,7 @@ class Trainer:
 
             # PPO update
             actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance, \
-                pre_clip_grad_norm, critic_weight_norm = \
+                pre_clip_grad_norm, critic_weight_norm, approx_kl, epochs_completed = \
                 self.ppo_update(buffer, net_1, optimiser_1, global_step,
                                 profile=_is_profile_update)
             
@@ -525,6 +528,8 @@ class Trainer:
                     "ratio_mean":           ratio_mean,
                     "advantage_mean":       advantage_mean,
                     "explained_variance":   explained_variance,
+                    "approx_kl":            approx_kl,
+                    "ppo_epochs_completed": epochs_completed,
 
                     # Critic instability diagnostics
                     "critic_instability_diagnostics/pre_clip_grad_norm":  pre_clip_grad_norm,
@@ -555,7 +560,7 @@ class Trainer:
         self.entropy_loss_coef = self.cfg.entropy_loss_coef_final + \
             (self.cfg.entropy_loss_coef_initial - self.cfg.entropy_loss_coef_final) * frac
 
-        num_epochs = self.cfg.k_epochs
+        num_epochs = self.cfg.num_ppo_epochs
         if self.overfit_mode == 'single-buffer':
             num_epochs = 1_000_000
 
@@ -567,16 +572,19 @@ class Trainer:
         explained_variance_meter = AverageMeter()
         pre_clip_grad_norm_meter = AverageMeter()
         critic_weight_norm_meter = AverageMeter()
+        approx_kl_meter = AverageMeter()
 
         ppo_t0 = time.perf_counter() if profile else None
         epoch_times: list[float] = []
+        epochs_completed = 0
 
         for epoch in range(num_epochs):
             epoch_t0 = time.perf_counter() if profile else None
+            epoch_approx_kl_meter = AverageMeter()
 
             for batch in buffer.get_minibatches(self.cfg.minibatch_size):
                 actor_loss, critic_loss, entropy, ratio_mean, advantage_mean, explained_variance, \
-                    pre_clip_grad_norm, critic_weight_norm = \
+                    pre_clip_grad_norm, critic_weight_norm, approx_kl = \
                     self.on_batch_update(
                         net,
                         optimiser,
@@ -592,9 +600,19 @@ class Trainer:
                 explained_variance_meter.add_sample(explained_variance)
                 pre_clip_grad_norm_meter.add_sample(pre_clip_grad_norm)
                 critic_weight_norm_meter.add_sample(critic_weight_norm)
+                approx_kl_meter.add_sample(approx_kl)
+                epoch_approx_kl_meter.add_sample(approx_kl)
 
             if profile:
                 epoch_times.append(time.perf_counter() - epoch_t0)
+
+            epochs_completed += 1
+
+            # KL early stopping: exit epoch loop if policy has drifted too far
+            epoch_kl = epoch_approx_kl_meter.average()
+            if epoch_kl > self.cfg.kl_threshold:
+                print(f"[ppo] KL early stop at epoch {epoch} (approx_kl={epoch_kl:.4f} > threshold={self.cfg.kl_threshold})")
+                break
 
             if epoch % 10 == 0 and self.overfit_mode == 'single-buffer':
                 window = 10 * len(buffer) // self.cfg.minibatch_size
@@ -616,7 +634,7 @@ class Trainer:
             n_epochs = len(epoch_times)
             print("\n" + "-"*60)
             print("[PROFILE] PPO update stats (update 2/2)")
-            print(f"  k_epochs              : {n_epochs}")
+            print(f"  num_ppo_epochs        : {n_epochs} / {num_epochs} (KL stop: {epochs_completed < num_epochs})")
             print(f"  Total PPO update time : {ppo_total:.3f}s")
             print(f"  Avg time per epoch    : {np.mean(epoch_times)*1000:.3f}ms")
             print(f"  Min epoch time        : {np.min(epoch_times)*1000:.3f}ms")
@@ -638,6 +656,8 @@ class Trainer:
             explained_variance_meter.average(),
             pre_clip_grad_norm_meter.average(),
             critic_weight_norm_meter.average(),
+            approx_kl_meter.average(),
+            epochs_completed,
         )
 
 
@@ -674,6 +694,12 @@ class Trainer:
 
         explained_variance = 1 - (returns - values).var() / returns.var()
 
+        # Approximate KL divergence (numerically stable, second-order estimate)
+        # KL(π_old || π_new) ≈ mean((ratio - 1) - log(ratio))
+        with t.no_grad():
+            log_ratio = new_log_probs - old_log_probs
+            approx_kl = ((ratio - 1) - log_ratio).mean().item()
+
         return (
             actor_loss.item(),
             critic_loss.item(),
@@ -683,6 +709,7 @@ class Trainer:
             explained_variance.item(),
             pre_clip_grad_norm,
             critic_weight_norm,
+            approx_kl,
         )
 
 
@@ -719,7 +746,7 @@ class Trainer:
             batch = minibatches[step_idx % len(minibatches)]
             current_lr = temp_optimiser.param_groups[0]["lr"]
 
-            actor_loss, critic_loss, entropy, _, _, _, _, _ = self.on_batch_update(
+            actor_loss, critic_loss, entropy, _, _, _, _, _, _ = self.on_batch_update(
                 temp_net,
                 temp_optimiser,
                 batch,
@@ -1025,6 +1052,20 @@ if __name__ == "__main__":
         default=1,
         help="Number of parallel env workers for rollout collection."
     )
+    parser.add_argument(
+        "--kl_threshold",
+        type=float,
+        default=0.01,
+        metavar="KL",
+        help="Max approximate KL divergence allowed per PPO update. The epoch loop exits early when exceeded. Default: 0.01."
+    )
+    parser.add_argument(
+        "--num_ppo_epochs",
+        type=int,
+        default=6,
+        metavar="K",
+        help="Number of PPO gradient epochs per rollout (subject to KL early stopping). Default: 6."
+    )
     
     # RL Hyperparameters
     parser.add_argument(
@@ -1039,7 +1080,7 @@ if __name__ == "__main__":
         "--step_penalty", 
         type=float, 
         default=0.0, 
-        help="Penalty applied at each step."
+        help="Penalty applied at each step. A positive value here will add its negative to each step."
     )
     parser.add_argument(
         "--tower_damage_reward_scale", 
@@ -1078,6 +1119,8 @@ if __name__ == "__main__":
         tower_distruction_reward=args.tower_distruction_reward,
         winning_reward=args.winning_reward,
         num_envs=args.num_envs,
+        kl_threshold=args.kl_threshold,
+        num_ppo_epochs=args.num_ppo_epochs,
     )
 
     trainer.train()
