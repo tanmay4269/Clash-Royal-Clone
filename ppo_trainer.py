@@ -1100,7 +1100,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num_ppo_epochs",
         type=int,
-        default=40,
+        default=6,
         metavar="K",
         help="Number of PPO gradient epochs per rollout (subject to KL early stopping)."
     )
