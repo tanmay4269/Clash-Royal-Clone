@@ -172,9 +172,51 @@ class RolloutBuffer:
         return unflattened_dict
 
 
+    def forced_skip_mask(self, deck_deploy_costs, max_elixirs):
+        """
+        Returns a bool tensor (N,) that is True for every step where the agent
+        was forced to skip — i.e. elixir < cost of every card in the deck.
+        """
+        states      = self.unflatten_dict(self.states[: self.ptr], self.state_shapes)
+        norm_elixirs = states["elixirs"]                              # (N, 1)
+        raw_elixirs  = (norm_elixirs + 1.0) / 2.0 * max_elixirs      # (N, 1)
+        elixir_mask  = deck_deploy_costs.unsqueeze(0) > raw_elixirs  # (N, num_cards)
+        return elixir_mask.all(dim=-1)                                # (N,)
+
+
+    def drop_forced_skips(self, deck_deploy_costs, max_elixirs):
+        """
+        Remove all forced-skip steps in-place and return (n_before, n_dropped).
+        After this call, self.ptr reflects the compacted size and get_minibatches
+        works unchanged — no other modifications needed.
+        """
+        if self.ptr == 0 or self.state_shapes is None:
+            return 0, 0
+
+        forced_skip = self.forced_skip_mask(deck_deploy_costs, max_elixirs)
+        keep     = ~forced_skip
+        n_before  = self.ptr
+        n_dropped = int(forced_skip.sum().item())
+
+        if n_dropped == 0:
+            return n_before, 0
+
+        self.states     = self.states[:n_before][keep]
+        self.actions    = self.actions[:n_before][keep]
+        self.log_probs  = self.log_probs[:n_before][keep]
+        self.rewards    = self.rewards[:n_before][keep]
+        self.values     = self.values[:n_before][keep]
+        self.dones      = self.dones[:n_before][keep]
+        self.advantages = self.advantages[:n_before][keep]
+        self.returns    = self.returns[:n_before][keep]
+        self.ptr        = n_before - n_dropped
+
+        return n_before, n_dropped
+
+
     def __len__(self):
         return self.ptr
 
-    
+
     def reset(self):
         self.ptr = 0

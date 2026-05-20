@@ -1,8 +1,9 @@
 **/__pycache__
 .tmp
 tmp/
-saved-videos
-videos
-wandb
-checkpoints
+videos/
+saved-videos/
+wandb/
+checkpoints/
 runs/
+saved-runs/

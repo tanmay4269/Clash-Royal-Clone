@@ -56,6 +56,7 @@ class Trainer:
         kl_early_stopping=False,
         advantage_normalization_type="minibatch",
         num_ppo_epochs=40,
+        drop_forced_skips=False,
 ):
         # Seed first — before ANY CUDA init, gym.make, or network construction
         self.cfg = Dict()
@@ -145,9 +146,9 @@ class Trainer:
 
         self.cfg.buffer.gae_lambda = 0.95
 
-        self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.unwrapped.FIXED_DT * 10)  # Usually 10 to 100 episodes
-        if self.debug:
-            self.cfg.buffer.n_steps = 2048
+        self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.unwrapped.FIXED_DT * 100)  # Usually 10 to 100 episodes
+        # if self.debug:
+        #     self.cfg.buffer.n_steps = 2048
 
         # Elo Rating
         self.cfg.elo.initial_rating = 1200
@@ -217,6 +218,8 @@ class Trainer:
         self.cfg.num_ppo_epochs = num_ppo_epochs  # gradient steps per rollout
         self.cfg.kl_threshold = kl_threshold  # KL early-stop threshold
         self.cfg.kl_early_stopping = kl_early_stopping
+        self.cfg.drop_forced_skips = drop_forced_skips
+
         self.cfg.max_steps = 10_000_000  # total env steps
 
         # 
@@ -234,8 +237,8 @@ class Trainer:
         os.makedirs(self.video_dir, exist_ok=True)
 
         self.video_every_k_global_steps = 20_000
-        if self.debug:
-            self.video_every_k_global_steps = 5_000
+        # if self.debug:
+        #     self.video_every_k_global_steps = 5_000
 
         # WANDB logging
         self.wandb_logging = wandb_logging
@@ -279,17 +282,21 @@ class Trainer:
         tmp_path = self._training_state_path() + ".tmp"
         t.save(state, tmp_path)
         os.replace(tmp_path, self._training_state_path())  # atomic write
-        print(f"[state] saved training state at step {global_step}")
+        print(f"(state) saved training state at step {global_step}")
 
     def _load_training_state(self, net_1, optimiser_1):
         """Load persisted state into an already-constructed net/optimiser.
         Returns the global_step to resume from (0 if no state found)."""
         path = self._training_state_path()
         if not os.path.exists(path):
-            print(f"[state] no training_state.pt found in {self.run_dir} — starting fresh")
+            print(f"(state) no training_state.pt found in {self.run_dir} — starting fresh")
             return 0
 
-        state = t.load(path, weights_only=False)
+        state = t.load(
+            path, 
+            weights_only=False, 
+            map_location=t.device("cpu") if not t.cuda.is_available() else t.device("cuda")
+        )
         net_1.load_state_dict(state["net_1_state_dict"])
         optimiser_1.load_state_dict(state["optimiser_state"])
         self.current_elo        = state["current_elo"]
@@ -299,7 +306,7 @@ class Trainer:
         self.checkpoint_manager.load_state(state["checkpoint_manager"])
 
         global_step = state["global_step"]
-        print(f"[state] resumed from step {global_step} (elo={self.current_elo:.1f})")
+        print(f"(state) resumed from step {global_step} (elo={self.current_elo:.1f})")
         return global_step
 
 
@@ -317,9 +324,8 @@ class Trainer:
         else:
             global_step = 0
 
-        next_video = 0
+        next_video = (global_step // self.video_every_k_global_steps + 1) * self.video_every_k_global_steps
         next_save_state = (global_step // self.save_state_every + 1) * self.save_state_every
-        # next_video = self.video_every_k_global_steps
 
         initial_net = deepcopy(net_1)
         opponent_elo = self.cfg.elo.initial_rating
@@ -488,12 +494,33 @@ class Trainer:
             # Merge per-env buffers into one for PPO update
             buffer = RolloutBuffer.merge(buffers)
 
+            # --- Drop / log forced-skip steps ---
+            if self.cfg.drop_forced_skips:
+                n_before, n_dropped = buffer.drop_forced_skips(
+                    net_1.deck_deploy_costs, net_1.max_elixirs
+                )
+                if self.debug:
+                    n_after = n_before - n_dropped
+                    print(
+                        f"(skip-drop) step {global_step:7d} | "
+                        f"dropped {n_dropped}/{n_before} "
+                        f"({n_dropped / max(n_before, 1):.1%}) → {n_after} kept"
+                    )
+            elif self.debug:
+                mask = buffer.forced_skip_mask(net_1.deck_deploy_costs, net_1.max_elixirs)
+                n = buffer.ptr
+                n_forced = int(mask.sum().item())
+                print(
+                    f"(debug) step {global_step:7d} | forced-skip fraction: "
+                    f"{n_forced}/{n} = {n_forced / max(n, 1):.3%}"
+                )
+
             # --- Profile: print buffer collection stats ---
             if _is_profile_update:
                 _buf_total = time.perf_counter() - _buf_collect_start
                 _n_frames = len(_frame_times)
                 print("\n" + "="*60)
-                print("[PROFILE] Buffer collection stats (update 2/2)")
+                print("(PROFILE) Buffer collection stats (update 2/2)")
                 print(f"  Total collection time : {_buf_total:.3f}s")
                 print(f"  Steps collected       : {steps_collected}")
                 print(f"  Time per step         : {_buf_total / max(steps_collected, 1) * 1000:.3f}ms")
@@ -518,7 +545,7 @@ class Trainer:
 
             profile_update_count += 1
             if self.profile and profile_update_count >= 2:
-                print("\n[PROFILE] 2 PPO updates complete — exiting.")
+                print("\n(PROFILE) 2 PPO updates complete — exiting.")
                 break
 
             recent = ep_returns[-100:]
@@ -556,7 +583,7 @@ class Trainer:
                 self._save_training_state(global_step, net_1, optimiser_1)
                 next_save_state = global_step + self.save_state_every
 
-    
+
     def ppo_update(self, buffer, net, optimiser, global_step=0, profile=False):
         if self.cfg.lr_tuner.enabled and not self.lr_tuned:
             self.lr_finder(buffer, net, optimiser)
@@ -629,7 +656,7 @@ class Trainer:
             # KL early stopping: exit epoch loop if policy has drifted too far
             epoch_kl = epoch_approx_kl_meter.average()
             if self.cfg.kl_early_stopping and epoch_kl > self.cfg.kl_threshold:
-                print(f"[ppo] KL early stop at epoch {epoch} (approx_kl={epoch_kl:.4f} > threshold={self.cfg.kl_threshold})")
+                print(f"(ppo) KL early stop at epoch {epoch} (approx_kl={epoch_kl:.4f} > threshold={self.cfg.kl_threshold})")
                 break
 
             if epoch % 10 == 0 and self.overfit_mode == 'single-buffer':
@@ -651,7 +678,7 @@ class Trainer:
             ppo_total = time.perf_counter() - ppo_t0
             n_epochs = len(epoch_times)
             print("\n" + "-"*60)
-            print("[PROFILE] PPO update stats (update 2/2)")
+            print("(PROFILE) PPO update stats (update 2/2)")
             print(f"  num_ppo_epochs        : {n_epochs} / {num_epochs} (KL stop: {epochs_completed < num_epochs})")
             print(f"  Total PPO update time : {ppo_total:.3f}s")
             print(f"  Avg time per epoch    : {np.mean(epoch_times)*1000:.3f}ms")
@@ -739,7 +766,7 @@ class Trainer:
 
 
     def lr_finder(self, buffer, net, optimiser):
-        print("[lr_finder] Starting learning rate tuning...")
+        print("(lr_finder) Starting learning rate tuning...")
 
         initial_state = deepcopy(net.state_dict())
         min_lr = self.cfg.lr_tuner.min_lr
@@ -803,7 +830,7 @@ class Trainer:
         temp_net.load_state_dict(initial_state)
 
         if not loss_history:
-            raise RuntimeError("[lr_finder] failed to produce loss values")
+            raise RuntimeError("(lr_finder) failed to produce loss values")
 
         min_idx = int(np.argmin(loss_history))
         min_loss_lr = lr_history[min_idx]
@@ -814,7 +841,7 @@ class Trainer:
 
         self.learning_rate = suggested_lr
 
-        print(f"[lr_finder] min_loss_lr: {min_loss_lr:.3e} | suggested_lr: {suggested_lr:.3e}")
+        print(f"(lr_finder) min_loss_lr: {min_loss_lr:.3e} | suggested_lr: {suggested_lr:.3e}")
 
 
     def record_episode(self, step, net_1, net_2):
@@ -893,7 +920,7 @@ class Trainer:
             print(e)
         
         rec_env.close()
-        print(f"[video] step {step}:\t return: {ep_return}")
+        print(f"(video) step {step}:\t return: {ep_return}")
         
         if self.wandb_logging:
             video_path = os.path.join(self.video_dir, f"step{step:07d}-episode-0.mp4")
@@ -1104,7 +1131,13 @@ if __name__ == "__main__":
         metavar="K",
         help="Number of PPO gradient epochs per rollout (subject to KL early stopping)."
     )
-    
+    parser.add_argument(
+        "--drop_forced_skips",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Strip forced-skip steps (elixir < cheapest card) from the buffer before the PPO update."
+    )
+
     # RL Hyperparameters
     parser.add_argument(
         "--gae_gamma", 
@@ -1161,6 +1194,7 @@ if __name__ == "__main__":
         kl_early_stopping=args.kl_early_stopping,
         advantage_normalization_type=args.advantage_normalization_type,
         num_ppo_epochs=args.num_ppo_epochs,
+        drop_forced_skips=args.drop_forced_skips,
     )
 
     trainer.train()
