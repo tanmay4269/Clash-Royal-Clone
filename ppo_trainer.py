@@ -58,6 +58,7 @@ class Trainer:
         advantage_normalization_type="minibatch",
         num_ppo_epochs=40,
         drop_forced_skips=False,
+        num_games_in_buffer=10,
 ):
         # Seed first — before ANY CUDA init, gym.make, or network construction
         self.cfg = Dict()
@@ -147,7 +148,7 @@ class Trainer:
 
         self.cfg.buffer.gae_lambda = 0.95
 
-        self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.unwrapped.FIXED_DT * 100)  # Usually 10 to 100 episodes
+        self.cfg.buffer.n_steps = int(self.arena.game_duration * 1/self.env.unwrapped.FIXED_DT * num_games_in_buffer)  # Usually 10 to 100 episodes
         # if self.debug:
         #     self.cfg.buffer.n_steps = 2048
 
@@ -1143,6 +1144,12 @@ if __name__ == "__main__":
         default=False,
         help="Strip forced-skip steps (elixir < cheapest card) from the buffer before the PPO update."
     )
+    parser.add_argument(
+        "--num_games_in_buffer",
+        type=int,
+        default=10,
+        help="Number of games to keep in the rollout buffer."
+    )
 
     # RL Hyperparameters
     parser.add_argument(
@@ -1201,6 +1208,7 @@ if __name__ == "__main__":
         advantage_normalization_type=args.advantage_normalization_type,
         num_ppo_epochs=args.num_ppo_epochs,
         drop_forced_skips=args.drop_forced_skips,
+        num_games_in_buffer=args.num_games_in_buffer,
     )
 
     trainer.train()
