@@ -4,6 +4,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="gymnasium")  # T
 
 
 import os
+import glob
 import argparse
 from copy import deepcopy
 import time; os.environ["TZ"] = "Asia/Kolkata"
@@ -920,8 +921,13 @@ class Trainer:
             print(e)
         
         rec_env.close()
-        print(f"(video) step {step}:\t return: {ep_return}")
-        
+        print(f" step {step}:\t return: {ep_return}")
+
+        # Keep only the 10 most recent videos (rolling window)
+        videos = sorted(glob.glob(os.path.join(self.video_dir, "*.mp4")))
+        for old in videos[:-10]:
+            os.remove(old)
+
         if self.wandb_logging:
             video_path = os.path.join(self.video_dir, f"step{step:07d}-episode-0.mp4")
             if os.path.exists(video_path):
