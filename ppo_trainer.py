@@ -59,6 +59,8 @@ class Trainer:
         num_ppo_epochs=40,
         drop_forced_skips=False,
         num_games_in_buffer=10,
+        default_lr=1.5e-4,
+        minibatch_size=2048,
 ):
         # Seed first — before ANY CUDA init, gym.make, or network construction
         self.cfg = Dict()
@@ -209,10 +211,10 @@ class Trainer:
         
         self.lr_tuned = False
 
-        self.learning_rate = 1.5e-4  # default lr
+        self.learning_rate = default_lr  # default lr
 
         # Misc
-        self.cfg.minibatch_size = 2048
+        self.cfg.minibatch_size = minibatch_size
         if os.environ.get("DEBUG_MODE"):
             self.cfg.minibatch_size = 128
 
@@ -800,7 +802,7 @@ class Trainer:
             batch = minibatches[step_idx % len(minibatches)]
             current_lr = temp_optimiser.param_groups[0]["lr"]
 
-            actor_loss, critic_loss, entropy, _, _, _, _, _, _ = self.on_batch_update(
+            actor_loss, critic_loss, entropy, _, _, _, _, _, _, _ = self.on_batch_update(
                 temp_net,
                 temp_optimiser,
                 batch,
@@ -1150,6 +1152,18 @@ if __name__ == "__main__":
         default=10,
         help="Number of games to keep in the rollout buffer."
     )
+    parser.add_argument(
+        "--default_lr",
+        type=float,
+        default=1.5e-4,
+        help="Default learning rate (or learning rate after LR tuner if enabled)."
+    )
+    parser.add_argument(
+        "--minibatch_size",
+        type=int,
+        default=2048,
+        help="Minibatch size for PPO updates."
+    )
 
     # RL Hyperparameters
     parser.add_argument(
@@ -1209,6 +1223,8 @@ if __name__ == "__main__":
         num_ppo_epochs=args.num_ppo_epochs,
         drop_forced_skips=args.drop_forced_skips,
         num_games_in_buffer=args.num_games_in_buffer,
+        default_lr=args.default_lr,
+        minibatch_size=args.minibatch_size,
     )
 
     trainer.train()
